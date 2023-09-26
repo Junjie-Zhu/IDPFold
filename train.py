@@ -185,7 +185,7 @@ if __name__ == "__main__":
                         help="File for output of model parameters", required=True, type=str)
     parser.add_argument("-d", dest="data_path",
                         help="Directory where data is stored", required=False,
-                        type=str, default="../NMR_data/pkls_re")
+                        type=str, default="../NMR_data/pkls")
     parser.add_argument("-ep", dest="epochs", help="Number of epochs",
                         required=False, type=int, default=10)
     args = parser.parse_args()
