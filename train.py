@@ -16,9 +16,7 @@ torch.autograd.set_detect_anomaly(True)
 
 def to_cuda(features):
     for feature in features:
-
-        if "atom_names" not in feature and "cyclic_bond_indices" not in feature:
-            features[feature] = features[feature].cuda()
+        features[feature] = features[feature].cuda()
 
     return features
 
@@ -73,10 +71,10 @@ def train(model, model_type, epochs, output_file, batch_size, lr, sde, ema_decay
                                                            device="cuda")
 
             # Get network prediction
-            score_fn = model.get_score_fn(to_cuda(features), sde)
-            prediction = score_fn(perturbed_data, t)
+            features = to_cuda(features)
+            prediction = model.predict_forces(features['node_attr'], features['coordinates'], t, sde)
 
-            all_losses, loss = dsm(prediction, std, z,)
+            all_losses, loss = dsm(prediction, std, z, )
 
             for index, i in enumerate(all_losses):
                 losses.append(torch.sum(i).cpu().detach().numpy())
@@ -122,8 +120,8 @@ def train(model, model_type, epochs, output_file, batch_size, lr, sde, ema_decay
                                                                        device="cuda")
 
                         # Get network prediction
-                        score_fn = model.get_score_fn(to_cuda(features), sde)
-                        prediction = score_fn(perturbed_data, t)
+                        features = to_cuda(features)
+                        prediction = model.predict_forces(features['node_attr'], features['coordinates'], t, sde)
 
                         all_losses, loss = dsm(prediction, std, z, )
 
@@ -190,9 +188,6 @@ if __name__ == "__main__":
                         type=str, default="./")
     parser.add_argument("-ep", dest="epochs", help="Number of epochs",
                         required=False, type=int, default=10)
-    parser.add_argument("-dt", dest="dataset", type=str,
-                        help="Dataset to train on, fragment or MD",
-                        required=False, default="fragment")
     args = parser.parse_args()
 
     config = config_backbone
@@ -212,10 +207,9 @@ if __name__ == "__main__":
         train(model, args.model, args.epochs, args.output_file,
               config.training.batch_size, config.training.lr, sde,
               ema_decay=config.training.ema, gradient_clip=config.training.gradient_clip,
-              saved_params=args.saved_model, data_path=args.data_path,
-              dataset_type=args.dataset)
+              saved_params=args.saved_model, data_path=args.data_path, )
     else:
 
         train(model, args.model, args.epochs, args.output_file, config.training.batch_size,
               config.training.lr, sde, ema_decay=config.training.ema, gradient_clip=config.training.gradient_clip,
-              data_path=args.data_path, dataset_type=args.dataset)
+              data_path=args.data_path, )

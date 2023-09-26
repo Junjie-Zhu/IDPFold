@@ -36,49 +36,78 @@ class ConvLayer(nn.Module):
         return out
 
 
-class IDPFold(nn.Module):
+class Siege(nn.Module):
 
     def __init__(self, config):
-        super(IDPFold, self).__init__()
+        super(Siege, self).__init__()
 
-        self.h_a = config.network['h_a']
-        self.h_b = config.network['h_b']
-        self.n_conv = config.network['n_conv']
-        # self.embedding = nn.Embedding(60, 32)
-        self.node_in = nn.Linear(1, 32)
+        self.h_a = config['h_a']
+        self.h_b = config['h_b']
+        self.n_conv = config['n_conv']
+        self.node_in = nn.Embedding(60, 128)
 
         self.convs = nn.ModuleList([ConvLayer(self.h_a, self.h_b, random_seed=999) for _ in range(self.n_conv)])
-        self.e_out = nn.Linear(32, 1)
+        self.t_embed = nn.ModuleList([TimeLinear() for _ in range(self.n_conv)])
+        self.e_out = nn.Linear(128, 1)
 
-    def forward(self, node_attr, edge_attr, edge_idx):
+    def forward(self, node_attr, edge_attr, edge_idx, t):
         node_attr = self.node_in(node_attr)
 
         for idx in range(self.n_conv):
             node_attr = self.convs[idx](node_attr, edge_attr, edge_idx)
+            node_attr = self.t_embed[idx](node_attr, t)
 
         e_out = torch.sum(self.e_out(node_attr))
 
         return e_out
 
+    def predict(self, node_attr, coords, t):
+        B, N, C = coords.shape()
+        edge_attr = (coords.unsqueeze(dim=-1) - coords.unsqueeze(dim=-2)).norm(dim=-1)
+        non_self_mask = edge_attr != 0
+        edge_attr = edge_attr[non_self_mask].view(B, N, N - 1, 1)
 
-def predict(coords):
-    node_attr = np.arange(3)
-    node_attr = torch.Tensor(node_attr).unsqueeze(-1).unsqueeze(0)
+        edge_idx = torch.LongTensor(torch.arange(N).expand(N, -1))
+        diagonal_mask = ~torch.eye(edge_idx.size(0), dtype=torch.bool)
+        edge_idx = edge_idx[diagonal_mask].view(B, N, N - 1)
 
-    edge_attr = (coords.view(-1, 1, 3) - coords.view(1, -1, 3)).norm(dim=-1)
-    non_self_mask = edge_attr != 0
-    edge_attr = edge_attr[non_self_mask].view(1, -1, 2, 1)
+        e_out = self.forward(node_attr, edge_attr, edge_idx, t)
 
-    edge_idx = torch.LongTensor([[[1, 2], [0, 2], [0, 1]]])
+        return e_out
 
-    model = IDPFold()
-    e_out = model(node_attr, edge_attr, edge_idx)
-    return e_out
+    def predict_forces(self, node_attr, coords, t, sde):
+        _, std = sde.marginal_prob(torch.zeros(coords.shape).to(coords.device), t)
+
+        coords = coords.clone().requires_grad_()
+        self.predict(node_attr, coords, t).backward()
+        forces = - 1 * coords.grad / std[:, None, None, None]
+
+        return forces
 
 
-def predict_forces(coords):
-    coords = coords.clone().requires_grad_()
-    predict(coords).backward()
-    forces = -coords.grad
+class TimeLinear(nn.Module):
 
-    return forces
+    def __init__(self):
+        super(TimeLinear, self).__init__()
+
+        self.node_linear = nn.Linear()
+
+        self.time_weight_linear = nn.Linear(1, 128, bias=False)
+        self.time_bias_linear = nn.Linear(1, 128, bias=False)
+
+    def forward(self, node_attr, t):
+        node_attr = self.node_linear(node_attr)
+
+        t = t.view(node_attr.shape[0], 1, 1)
+
+        node_attr = node_attr * torch.Sigmoid(self.time_weight_linear(t)) + torch.tanh(self.time_bias_linear(t))
+
+        return node_attr
+
+
+def randomSeed(random_seed):
+    """Given a random seed, this will help reproduce results across runs"""
+    if random_seed is not None:
+        torch.manual_seed(random_seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(random_seed)
