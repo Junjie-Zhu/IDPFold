@@ -3,7 +3,7 @@ from tensor_utils import normal_prob
 import torch
 
 
-def sample_noise(sde, x, atom_mask, device, eps=1e-5):
+def sample_noise(sde, x, device, eps=1e-5):
     t = torch.rand(x.shape[0]) * (sde.T - eps) + eps
 
     z = torch.randn_like(x)
@@ -20,9 +20,8 @@ def sample_noise(sde, x, atom_mask, device, eps=1e-5):
            mean.to(device), std.to(device)
 
 
-def dsm(prediction, std, z, atom_mask):
-    all_losses = torch.square(prediction * std[:, None, None, None] + z) * \
-                 atom_mask[:, None, :, :]
+def dsm(prediction, std, z):
+    all_losses = torch.square(prediction * std[:, None, None, None] + z)
 
     loss = torch.mean(torch.sum(all_losses, dim=(-1, -2, -3)))
 

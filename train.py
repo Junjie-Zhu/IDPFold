@@ -1,7 +1,7 @@
 from model.model import IDPFold, predict_forces
 from model.ema import ExponentialMovingAverage
-from data.dataset import
-from utils.dataset_utils import collate, collate_multiple_coords
+from model.model_config import config_backbone
+from data.dataset import BackboneDataset, collate
 from utils.training_utils import sample_noise, dsm
 from time import time
 import datetime
@@ -24,7 +24,7 @@ def to_cuda(features):
 
 
 def train(model, model_type, epochs, output_file, batch_size, lr, sde, ema_decay,
-          gradient_clip=None, eps=1e-5, saved_params=None, data_path="./",):
+          gradient_clip=None, eps=1e-5, saved_params=None, data_path="./", ):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     if not saved_params is None:
@@ -38,7 +38,17 @@ def train(model, model_type, epochs, output_file, batch_size, lr, sde, ema_decay
             ema.load_state_dict(torch.load(saved_params)["ema_state_dict"])
 
     # Dataset loading
+    dataset = BackboneDataset(mode='train')
+    val_dataset = BackboneDataset(mode='test')
+    collate_fn = collate
 
+    loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size,
+                                         num_workers=4, collate_fn=collate_fn,
+                                         shuffle=True)
+
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size,
+                                             num_workers=4, collate_fn=collate_fn,
+                                             shuffle=True)
 
     start_time = time()
 
@@ -59,15 +69,14 @@ def train(model, model_type, epochs, output_file, batch_size, lr, sde, ema_decay
 
             optimizer.zero_grad()
 
-            z, t, perturbed_data, mean, std = sample_noise(sde, features["coordinates_backbone"],
-                                                           features["atom_mask_backbone"],
+            z, t, perturbed_data, mean, std = sample_noise(sde, features["coordinates"],
                                                            device="cuda")
 
+            # Get network prediction
             score_fn = model.get_score_fn(to_cuda(features), sde)
-
             prediction = score_fn(perturbed_data, t)
-            all_losses, loss = dsm(prediction, std, z,
-                                   features["atom_mask_backbone"])
+
+            all_losses, loss = dsm(prediction, std, z,)
 
             for index, i in enumerate(all_losses):
                 losses.append(torch.sum(i).cpu().detach().numpy())
@@ -105,19 +114,18 @@ def train(model, model_type, epochs, output_file, batch_size, lr, sde, ema_decay
                     ema.store(model.parameters())
                     ema.copy_to(model.parameters())
 
-                for value_val, features in enumerate(validation_loader):
+                for value_val, features in enumerate(val_loader):
 
                     torch.cuda.empty_cache()
                     with torch.no_grad():
-                        z, t, perturbed_data, mean, std = sample_noise(sde, features["coordinates_backbone"],
-                                                                       features["atom_mask_backbone"],
+                        z, t, perturbed_data, mean, std = sample_noise(sde, features["coordinates"],
                                                                        device="cuda")
 
+                        # Get network prediction
                         score_fn = model.get_score_fn(to_cuda(features), sde)
-
                         prediction = score_fn(perturbed_data, t)
-                        all_losses, loss = dsm(prediction, std, z,
-                                               features["atom_mask_backbone"])
+
+                        all_losses, loss = dsm(prediction, std, z, )
 
                         for index, i in enumerate(all_losses):
                             losses.append(torch.sum(i).cpu().detach().numpy())
@@ -187,8 +195,8 @@ if __name__ == "__main__":
                         required=False, default="fragment")
     args = parser.parse_args()
 
-    config = config_rotamer
-    model = IDPFold(config.model_config)
+    config = config_backbone
+    model = IDPFold(config.network)
 
     sde = config.sde_config.sde(beta_min=config.sde_config.beta_min,
                                 beta_max=config.sde_config.beta_max)

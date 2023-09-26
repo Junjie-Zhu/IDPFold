@@ -38,12 +38,12 @@ class ConvLayer(nn.Module):
 
 class IDPFold(nn.Module):
 
-    def __init__(self, **kwargs):
+    def __init__(self, config):
         super(IDPFold, self).__init__()
 
-        self.h_a = kwargs.get('h_a', 32)
-        self.h_b = kwargs.get('h_b', 1)
-        self.n_conv = kwargs.get('n_conv', 2)
+        self.h_a = config.network['h_a']
+        self.h_b = config.network['h_b']
+        self.n_conv = config.network['n_conv']
         # self.embedding = nn.Embedding(60, 32)
         self.node_in = nn.Linear(1, 32)
 
