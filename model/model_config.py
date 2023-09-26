@@ -1,4 +1,4 @@
-from sde_lib import cmsubVPSDE, subVPSDE
+from .sde_lib import cmsubVPSDE, subVPSDE
 import ml_collections as mlc
 
 config_backbone = mlc.ConfigDict(
@@ -6,8 +6,9 @@ config_backbone = mlc.ConfigDict(
         "training":
             {
                 "lr": 0.0001,
-                "batch_size": 8,
-                "ema": 0.9999
+                "batch_size": 16,
+                "ema": 0.9999,
+                "gradient_clip": 1,
             },
         "network":
             {

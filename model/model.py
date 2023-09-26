@@ -44,10 +44,10 @@ class Siege(nn.Module):
         self.h_a = config['h_a']
         self.h_b = config['h_b']
         self.n_conv = config['n_conv']
-        self.node_in = nn.Embedding(60, 128)
+        self.node_in = nn.Embedding(60, self.h_a)
 
         self.convs = nn.ModuleList([ConvLayer(self.h_a, self.h_b, random_seed=999) for _ in range(self.n_conv)])
-        self.t_embed = nn.ModuleList([TimeLinear() for _ in range(self.n_conv)])
+        self.t_embed = nn.ModuleList([TimeLinear(self.h_a) for _ in range(self.n_conv)])
         self.e_out = nn.Linear(128, 1)
 
     def forward(self, node_attr, edge_attr, edge_idx, t):
@@ -87,17 +87,13 @@ class Siege(nn.Module):
 
 class TimeLinear(nn.Module):
 
-    def __init__(self):
+    def __init__(self, h_a):
         super(TimeLinear, self).__init__()
 
-        self.node_linear = nn.Linear()
-
-        self.time_weight_linear = nn.Linear(1, 128, bias=False)
-        self.time_bias_linear = nn.Linear(1, 128, bias=False)
+        self.time_weight_linear = nn.Linear(1, h_a, bias=False)
+        self.time_bias_linear = nn.Linear(1, h_a, bias=False)
 
     def forward(self, node_attr, t):
-        node_attr = self.node_linear(node_attr)
-
         t = t.view(node_attr.shape[0], 1, 1)
 
         node_attr = node_attr * torch.Sigmoid(self.time_weight_linear(t)) + torch.tanh(self.time_bias_linear(t))

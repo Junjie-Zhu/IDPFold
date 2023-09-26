@@ -1,5 +1,5 @@
 from torch_scatter import scatter, scatter_add
-from tensor_utils import normal_prob
+from .tensor_utils import normal_prob
 import torch
 
 

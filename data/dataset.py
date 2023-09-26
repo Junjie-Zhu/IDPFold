@@ -52,7 +52,7 @@ class BackboneDataset(Dataset):
         res_serial = [res for res in model.keys()]
         atom_serial = [f'{residue[0]}_{atom}'
                        for residue in res_serial
-                       for atom in np.array(model[residue])[:, 0]]
+                       for atom in ['N', 'CA', 'C']]
 
         # Make one-hot embedding
         node_attr = torch.zeros([len(atom_serial), 60])

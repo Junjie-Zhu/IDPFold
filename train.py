@@ -1,4 +1,4 @@
-from model.model import IDPFold, predict_forces
+from model.model import Siege
 from model.ema import ExponentialMovingAverage
 from model.model_config import config_backbone
 from data.dataset import BackboneDataset, collate
@@ -21,7 +21,7 @@ def to_cuda(features):
     return features
 
 
-def train(model, model_type, epochs, output_file, batch_size, lr, sde, ema_decay,
+def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
           gradient_clip=None, eps=1e-5, saved_params=None, data_path="./", ):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
@@ -191,7 +191,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     config = config_backbone
-    model = IDPFold(config.network)
+    model = Siege(config.network)
 
     sde = config.sde_config.sde(beta_min=config.sde_config.beta_min,
                                 beta_max=config.sde_config.beta_max)
@@ -204,12 +204,12 @@ if __name__ == "__main__":
     model.cuda()
 
     if args.use_saved:
-        train(model, args.model, args.epochs, args.output_file,
+        train(model, args.epochs, args.output_file,
               config.training.batch_size, config.training.lr, sde,
               ema_decay=config.training.ema, gradient_clip=config.training.gradient_clip,
               saved_params=args.saved_model, data_path=args.data_path, )
     else:
 
-        train(model, args.model, args.epochs, args.output_file, config.training.batch_size,
+        train(model, args.epochs, args.output_file, config.training.batch_size,
               config.training.lr, sde, ema_decay=config.training.ema, gradient_clip=config.training.gradient_clip,
               data_path=args.data_path, )
