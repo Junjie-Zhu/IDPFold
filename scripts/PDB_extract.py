@@ -84,7 +84,7 @@ def organize_data(atom_data):
                 if residue_info not in residue_dict[index]:
                     residue_dict[index][residue_info] = []
 
-                residue_dict[index][residue_info].append([atom_name, x, y, z])
+                residue_dict[index][residue_info].append([x, y, z])
         index += 1
     return residue_dict
 
@@ -102,9 +102,10 @@ def check_sequence(residue_dict):
 
 
 def save_as_pkl(residue_dict, output_prefix):
-    output_file = f'{output_prefix}.pkl'
-    with open(output_file, 'wb') as f:
-        pickle.dump(residue_dict, f)
+    for i in range(len(residue_dict)):
+        output_file = f'{output_prefix}_{i}.pkl'
+        with open(output_file, 'wb') as f:
+            pickle.dump(residue_dict[i], f)
 
 
 def load_as_pkl(input_prefix):
