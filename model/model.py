@@ -17,11 +17,12 @@ class ConvLayer(nn.Module):
         self.bn_output = nn.BatchNorm1d(self.h_a)
         self.activation_output = nn.ReLU()
 
-    def forward(self, atom_emb, nbr_emb, nbr_adj_list):
+    def forward(self, atom_emb, nbr_emb, nbr_adj_list, atom_mask):
         N, M = nbr_adj_list.shape[1:]
         B = atom_emb.shape[0]
 
         atom_nbr_emb = atom_emb[torch.arange(B).unsqueeze(-1), nbr_adj_list.view(B, -1)].view(B, N, M, self.h_a)
+        atom_nbr_emb *= atom_mask.unsqueeze(-1)
 
         total_nbr_emb = torch.cat([atom_emb.unsqueeze(2).expand(B, N, M, self.h_a), atom_nbr_emb, nbr_emb], dim=-1)
         total_gated_emb = self.fc_full(total_nbr_emb)
@@ -50,19 +51,26 @@ class Siege(nn.Module):
         self.t_embed = nn.ModuleList([TimeLinear(self.h_a) for _ in range(self.n_conv)])
         self.e_out = nn.Linear(128, 1)
 
-    def forward(self, node_attr, edge_attr, edge_idx, t):
+    def forward(self, node_attr, edge_attr, edge_idx, t, atom_mask):
         node_attr = self.node_in(node_attr)
 
+        atom_mask = atom_mask.unsqueeze(dim=-1)
         for idx in range(self.n_conv):
+            node_attr *= atom_mask
             node_attr = self.convs[idx](node_attr, edge_attr, edge_idx)
+
+            node_attr *= atom_mask
             node_attr = self.t_embed[idx](node_attr, t)
 
+        node_attr *= atom_mask
         e_out = torch.sum(self.e_out(node_attr))
 
         return e_out
 
-    def predict(self, node_attr, coords, t):
+    def predict(self, node_attr, coords, t, atom_mask):
         B, N, C = coords.shape()
+
+        coords *= atom_mask
         edge_attr = (coords.unsqueeze(dim=-1) - coords.unsqueeze(dim=-2)).norm(dim=-1)
         non_self_mask = edge_attr != 0
         edge_attr = edge_attr[non_self_mask].view(B, N, N - 1, 1)
@@ -71,15 +79,15 @@ class Siege(nn.Module):
         diagonal_mask = ~torch.eye(edge_idx.size(0), dtype=torch.bool)
         edge_idx = edge_idx[diagonal_mask].view(B, N, N - 1)
 
-        e_out = self.forward(node_attr, edge_attr, edge_idx, t)
+        e_out = self.forward(node_attr, edge_attr, edge_idx, t, atom_mask)
 
         return e_out
 
-    def predict_forces(self, node_attr, coords, t, sde):
+    def predict_forces(self, node_attr, coords, t, sde, atom_mask):
         _, std = sde.marginal_prob(torch.zeros(coords.shape).to(coords.device), t)
 
         coords = coords.clone().requires_grad_()
-        self.predict(node_attr, coords, t).backward()
+        self.predict(node_attr, coords, t, atom_mask).backward()
         forces = - 1 * coords.grad / std[:, None, None, None]
 
         return forces

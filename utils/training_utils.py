@@ -16,8 +16,8 @@ def sample_noise(sde, x, device, eps=1e-5):
     perturbed_data = mean + std[:, None, None, None] * z
 
     return z.to(device), t.to(device), \
-           perturbed_data.to(device), \
-           mean.to(device), std.to(device)
+        perturbed_data.to(device), \
+        mean.to(device), std.to(device)
 
 
 def dsm(prediction, std, z):

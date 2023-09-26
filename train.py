@@ -72,7 +72,8 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
 
             # Get network prediction
             features = to_cuda(features)
-            prediction = model.predict_forces(features['node_attr'], features['coordinates'], t, sde)
+            prediction = model.predict_forces(features['node_attr'], features['coordinates'],
+                                              t, sde, features['atom_mask'])
 
             all_losses, loss = dsm(prediction, std, z, )
 
@@ -121,7 +122,8 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
 
                         # Get network prediction
                         features = to_cuda(features)
-                        prediction = model.predict_forces(features['node_attr'], features['coordinates'], t, sde)
+                        prediction = model.predict_forces(features['node_attr'], features['coordinates'],
+                                                          t, sde, features['atom_mask'])
 
                         all_losses, loss = dsm(prediction, std, z, )
 
@@ -159,13 +161,13 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
                 print(log)
 
                 if (value + 1) % 100000 == 0:
-                    if not os.path.isdir("checkpoints_" + model_type):
-                        os.mkdir("checkpoints_" + model_type)
+                    if not os.path.isdir("checkpoints_"):
+                        os.mkdir("checkpoints_")
 
                     torch.save({"model_state_dict": model.state_dict(),
                                 "optimizer_state_dict": optimizer.state_dict()
-                                }, "checkpoints_" + model_type + "/" + \
-                               output_file.replace(".pth", "_" + str(value + 1) + ".pth"))
+                                },
+                               "checkpoints_" + "/" + output_file.replace(".pth", "_" + str(value + 1) + ".pth"))
 
                 losses = []
 

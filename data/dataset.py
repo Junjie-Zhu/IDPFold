@@ -55,14 +55,24 @@ class BackboneDataset(Dataset):
                        for atom in ['N', 'CA', 'C']]
 
         # Make one-hot embedding
-        node_attr = torch.zeros([len(atom_serial), 60])
+        node_attr = torch.zeros([256, 60])
         for atoms in range(len(node_attr)):
             node_attr[atoms, atom_order[atom_serial[atoms]]] = 1
 
+        # Padding node attribution to max length 256
+        mask = torch.ones([len(atom_serial)])
+        padding = torch.zeros([256 - len(atom_serial)])
+        atom_mask = torch.cat((mask, padding), 0)
+
         coords = np.array([np.array(resc).astype(float) for resc in model.values()])
+        coords = torch.Tensor(coords)
+
+        centered_coords = coords - torch.sum(coords, dim=0)[None, :] / len(coords)
+        centered_coords = torch.cat(centered_coords, torch.zeros([len(padding), 3]), 0)
 
         features = {'node_attr': node_attr,
-                    'coordinates': torch.Tensor(coords),
+                    'coordinates': centered_coords,
+                    'atom_mask': atom_mask,
                     }
         return features
 
