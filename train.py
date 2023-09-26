@@ -36,8 +36,8 @@ def train(model, model_type, epochs, output_file, batch_size, lr, sde, ema_decay
             ema.load_state_dict(torch.load(saved_params)["ema_state_dict"])
 
     # Dataset loading
-    dataset = BackboneDataset(mode='train')
-    val_dataset = BackboneDataset(mode='test')
+    dataset = BackboneDataset(data_dir=data_path, mode='train')
+    val_dataset = BackboneDataset(data_dir=data_path, mode='test')
     collate_fn = collate
 
     loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size,
@@ -185,7 +185,7 @@ if __name__ == "__main__":
                         help="File for output of model parameters", required=True, type=str)
     parser.add_argument("-d", dest="data_path",
                         help="Directory where data is stored", required=False,
-                        type=str, default="./")
+                        type=str, default="../NMR_data/pkls_re")
     parser.add_argument("-ep", dest="epochs", help="Number of epochs",
                         required=False, type=int, default=10)
     args = parser.parse_args()
