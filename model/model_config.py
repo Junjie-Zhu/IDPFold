@@ -12,9 +12,9 @@ config_backbone = mlc.ConfigDict(
             },
         "network":
             {
-                "h_a": 64,
-                "h_b": 16,
-                "n_conv": 8,
+                "h_a": 128,
+                "h_b": 1,
+                "n_conv": 4,
             },
         "sde_config": {
             "sde": subVPSDE,

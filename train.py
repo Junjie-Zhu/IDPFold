@@ -62,7 +62,8 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
         losses = []
 
         for value, features in enumerate(loader):
-
+            if features is None:
+                continue
             torch.cuda.empty_cache()
 
             optimizer.zero_grad()
@@ -80,6 +81,7 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
             for index, i in enumerate(all_losses):
                 losses.append(torch.sum(i).cpu().detach().numpy())
 
+            loss.requires_grad_(True)
             loss.backward()
 
             if gradient_clip is not None:
@@ -114,6 +116,9 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
                     ema.copy_to(model.parameters())
 
                 for value_val, features in enumerate(val_loader):
+
+                    if features is None:
+                        continue
 
                     torch.cuda.empty_cache()
                     with torch.no_grad():
