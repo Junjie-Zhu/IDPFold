@@ -6,15 +6,15 @@ config_backbone = mlc.ConfigDict(
         "training":
             {
                 "lr": 0.0001,
-                "batch_size": 16,
+                "batch_size": 2,
                 "ema": 0.9999,
-                "gradient_clip": 1,
+                "gradient_clip": None,
             },
         "network":
             {
-                "h_a": 128,
+                "h_a": 64,
                 "h_b": 1,
-                "n_conv": 4,
+                "n_conv": 8,
             },
         "sde_config": {
             "sde": subVPSDE,

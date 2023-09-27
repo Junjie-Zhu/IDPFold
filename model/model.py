@@ -2,7 +2,6 @@ import torch
 import numpy as np
 import torch.nn as nn
 
-
 class ConvLayer(nn.Module):
 
     def __init__(self, h_a, h_b, random_seed=None):
@@ -79,9 +78,7 @@ class Siege(nn.Module):
 
         edge_idx = torch.LongTensor(torch.arange(N).expand(N, -1).unsqueeze(0).expand(B, -1, -1))
         edge_idx = edge_idx[non_self_mask].view(B, N, N - 1)
-
         e_out = self.forward(node_attr, edge_attr, edge_idx, t, atom_mask)
-
         return e_out
 
     def predict_forces(self, node_attr, coords, t, sde, atom_mask):

@@ -35,7 +35,7 @@ atom_order = {atom: i for i, atom in enumerate(ATOM_LIST)}
 class BackboneDataset(Dataset):
     def __init__(self, data_dir='../NMR_data/pkls', mode='train', split=0.8):
         self.data_dir = data_dir
-        self.data_list = os.listdir(data_dir)
+        self.data_list = os.listdir(data_dir)[:30000]
 
         if mode == 'train':
             self.data_list = self.data_list[:int(split * len(self.data_list))]
@@ -54,12 +54,12 @@ class BackboneDataset(Dataset):
                        for residue in res_serial
                        for atom in ['N', 'CA', 'C']]
 
-        if len(atom_serial) > 384:
+        if len(atom_serial) > 768:
             return None
 
         # Make one-hot embedding
         node_attr = torch.zeros([len(atom_serial)], dtype=torch.long)
-        padding = torch.zeros([384 - len(atom_serial)], dtype=torch.long)
+        padding = torch.zeros([768 - len(atom_serial)], dtype=torch.long)
         atom_mask = torch.cat((node_attr, padding), 0)
 
         for atoms in range(len(node_attr)):

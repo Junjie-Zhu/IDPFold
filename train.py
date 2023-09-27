@@ -10,6 +10,7 @@ import sys
 import argparse
 import numpy as np
 import os
+import tqdm
 
 torch.autograd.set_detect_anomaly(True)
 
@@ -199,6 +200,7 @@ if __name__ == "__main__":
 
     config = config_backbone
     model = Siege(config.network)
+    # model = torch.nn.DataParallel(model)
 
     sde = config.sde_config.sde(beta_min=config.sde_config.beta_min,
                                 beta_max=config.sde_config.beta_max)
