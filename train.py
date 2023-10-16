@@ -74,8 +74,11 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
 
             # Get network prediction
             features = to_cuda(features)
-            prediction = model.predict_forces(features['node_attr'], features['coordinates'],
-                                              t, sde, features['atom_mask'])
+            try:
+                prediction = model.predict_forces(features['node_attr'], features['coordinates'],
+                                                  t, sde, features['atom_mask'])
+            except:
+                continue
 
             all_losses, loss = dsm(prediction, std, z, )
 
@@ -128,8 +131,12 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
 
                         # Get network prediction
                         features = to_cuda(features)
-                        prediction = model.predict_forces(features['node_attr'], features['coordinates'],
-                                                          t, sde, features['atom_mask'])
+
+                        try:
+                            prediction = model.predict_forces(features['node_attr'], features['coordinates'],
+                                                              t, sde, features['atom_mask'])
+                        except:
+                            continue
 
                         all_losses, loss = dsm(prediction, std, z, )
 
