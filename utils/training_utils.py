@@ -26,3 +26,7 @@ def dsm(prediction, std, z):
     loss = torch.mean(torch.sum(all_losses, dim=(-1, -2, -3)))
 
     return all_losses, loss
+
+
+def exp(prediction, target):
+    return 0
