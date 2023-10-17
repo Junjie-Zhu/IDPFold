@@ -40,24 +40,21 @@ ATOM_LIST = [f"{residue}_{atom}" for residue in RESIDUE_LIST for atom in ['N', '
 atom_order = {atom: i for i, atom in enumerate(ATOM_LIST)}
 
 
-class QM9(InMemoryDataset):
+class NMR(InMemoryDataset):
 
-    def __init__(self, data_dir='../NMR_data/pkls', mode='train', split=0.8, max_length=768):
+    def __init__(self, data_dir='../NMR_data/pkls', processed_dir='../NMR_data/processed', max_length=768):
         self.data_dir = data_dir
         self.data_list = os.listdir(data_dir)
         self.max_length = max_length
-
-        if mode == 'train':
-            self.data_list = self.data_list[:int(split * len(self.data_list))]
-        elif mode == 'val':
-            self.data_list = self.data_list[int(split * len(self.data_list)) + 1:]
+        self.processed_dirs = processed_dir
 
     def process(self):
 
-        data_collate = []
-
-        for index in range(len(self.data_list)):
+        parse = 0
+        
+        for index in tqdm(range(len(self.data_list))):
             name = self.data_list[index]
+            
             with open(os.path.join(self.data_dir, self.data_list[index]), 'rb') as f:
                 model = pickle.load(f)
 
@@ -67,7 +64,8 @@ class QM9(InMemoryDataset):
                            for atom in ['N', 'CA', 'C']]
 
             if len(atom_serial) > self.max_length:  # Select sequences of length < 256
-                return None
+                parse += 1
+                continue
 
             z = torch.tensor(len(atom_serial), dtype=torch.long)
 
@@ -94,6 +92,12 @@ class QM9(InMemoryDataset):
 
             data = Data(x=node_attr, pos=centered_coords, z=z, name=name,
                         edge_d_index=edge_d_index, edge_d_attr=edge_d_attr)
-            data_collate.append(data)
 
-        torch.save(self.collate(data_collate), '')
+            torch.save(data, os.path.join(self.processed_dirs, name.replace('.pkl', '.pt')))
+    
+        print(parse)
+
+
+if __name__ == '__main__':
+    dataset = NMR()
+    dataset.process()

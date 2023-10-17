@@ -146,8 +146,7 @@ class Siege(nn.Module):
         edge_sh = o3.spherical_harmonics(l=self.irreps_edge_attr,
                                          x=edge_vec, normalize=True, normalization='component')
 
-        node_atom = node_atom.new_tensor([-1, 0, -1, -1, -1, -1, 1, 2, 3, 4])[node_atom]
-        atom_embedding, atom_attr, atom_onehot = self.atom_embed(node_atom)
+        atom_embedding, atom_attr, atom_onehot = self.atom_embed(f_in)
         edge_length = edge_vec.norm(dim=1)
 
         edge_length_embedding = self.rbf(edge_length)

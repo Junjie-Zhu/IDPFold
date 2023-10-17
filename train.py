@@ -1,8 +1,8 @@
 from model.model import Siege
 from model.ema import ExponentialMovingAverage
 from model.model_config import config_backbone
-from data.dataset import BackboneDataset, collate
-from utils.training_utils import sample_noise, dsm
+from data.dataset import BackboneDataset
+from utils.training_utils import *
 from time import time
 import datetime
 import torch
@@ -12,18 +12,13 @@ import numpy as np
 import os
 import tqdm
 
+from torch_geometric.loader import DataLoader
+
 torch.autograd.set_detect_anomaly(True)
 
 
-def to_cuda(features):
-    for feature in features:
-        features[feature] = features[feature].cuda()
-
-    return features
-
-
 def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
-          gradient_clip=None, eps=1e-5, saved_params=None, data_path="./", ):
+          gradient_clip=None, eps=1e-5, saved_params=None, data_path="./", distributed=True):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     if not saved_params is None:
@@ -39,15 +34,19 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
     # Dataset loading
     dataset = BackboneDataset(data_dir=data_path, mode='train')
     val_dataset = BackboneDataset(data_dir=data_path, mode='test')
-    collate_fn = collate
 
-    loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size,
-                                         num_workers=4, collate_fn=collate_fn,
-                                         shuffle=True)
-
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size,
-                                             num_workers=4, collate_fn=collate_fn,
-                                             shuffle=True)
+    if distributed:
+        sampler_train = torch.utils.data.DistributedSampler(
+            dataset, num_replicas=get_world_size(), rank=get_rank(), shuffle=True
+        )
+        loader = DataLoader(dataset, batch_size=batch_size,
+                            sampler=sampler_train, num_workers=4,
+                            drop_last=True)
+    else:
+        loader = DataLoader(dataset, batch_size=batch_size,
+                            shuffle=True, num_workers=4,
+                            drop_last=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size)
 
     start_time = time()
 
@@ -73,7 +72,7 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
                                                            device="cuda")
 
             # Get network prediction
-            features = to_cuda(features)
+            features = features.to('cuda')
             prediction = model.predict_forces(features['node_attr'], features['coordinates'],
                                               t, sde, features['atom_mask'])
 
@@ -105,53 +104,7 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
                 print(log)
                 sys.stdout.flush()
 
-                losses = []
-
-            if (value + 1) % 10000 == 0 or (value == iters - 1):
-                model.eval()
-
-                losses = []
-
-                if ema_decay is not None:
-                    ema.store(model.parameters())
-                    ema.copy_to(model.parameters())
-
-                for value_val, features in enumerate(val_loader):
-
-                    if features is None:
-                        continue
-
-                    torch.cuda.empty_cache()
-                    with torch.no_grad():
-                        z, t, perturbed_data, mean, std = sample_noise(sde, features["coordinates"],
-                                                                       device="cuda")
-
-                        # Get network prediction
-                        features = to_cuda(features)
-                        prediction = model.predict_forces(features['node_attr'], features['coordinates'],
-                                                          t, sde, features['atom_mask'])
-
-                        all_losses, loss = dsm(prediction, std, z, )
-
-                        for index, i in enumerate(all_losses):
-                            losses.append(torch.sum(i).cpu().detach().numpy())
-
-                if ema_decay is not None:
-                    ema.restore(model.parameters())
-
-                losses = torch.stack(losses, dim=0)
-
-                losses = losses.cpu().numpy()
-
-                validation_losses.append(np.mean(losses))
-
-                log = "This is validation, Epoch [{}/{}]".format(
-                    e + 1, epochs)
-
-                log += ", {}: {:.5f}".format('Loss', np.mean(losses))
-                log += ", {}: {:.5f}".format('Std', np.std(losses))
-
-                if validation_losses[-1] == min(validation_losses):
+                if losses[-1] == min(losses):
 
                     param_dict = {"model_state_dict": model.state_dict(),
                                   "optimizer_state_dict": optimizer.state_dict()
@@ -160,11 +113,9 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
                     if ema_decay != None:
                         param_dict["ema_state_dict"] = ema.state_dict()
 
-                    print("Saving model with new minimum validation loss")
+                    print("Saving model with new minimum loss")
                     torch.save(param_dict, output_file)
                     print("Saved model successfully!")
-
-                print(log)
 
                 if (value + 1) % 100000 == 0:
                     if not os.path.isdir("checkpoints_"):
@@ -174,11 +125,6 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
                                 "optimizer_state_dict": optimizer.state_dict()
                                 },
                                "checkpoints_" + "/" + output_file.replace(".pth", "_" + str(value + 1) + ".pth"))
-
-                losses = []
-
-                sys.stdout.flush()
-                model.train()
 
 
 if __name__ == "__main__":
@@ -196,11 +142,28 @@ if __name__ == "__main__":
                         type=str, default="../NMR_data/pkls")
     parser.add_argument("-ep", dest="epochs", help="Number of epochs",
                         required=False, type=int, default=10)
+    parser.add_argument("--seed", type=int, default=12)  # My lucky number
+
+    # distributed training parameters
+    parser.add_argument('--world_size', default=1, type=int,
+                        help='number of distributed processes')
+    parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
+
     args = parser.parse_args()
+
+    init_distributed_mode(args)
+    is_main_process = (args.rank == 0)
+
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
 
     config = config_backbone
     model = Siege(config.network)
-    # model = torch.nn.DataParallel(model)
+    model.cuda()
+
+    # distributed training
+    if args.distributed:
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.local_rank])
 
     sde = config.sde_config.sde(beta_min=config.sde_config.beta_min,
                                 beta_max=config.sde_config.beta_max)
@@ -209,10 +172,6 @@ if __name__ == "__main__":
 
     if args.use_saved:
         model.load_state_dict(torch.load(args.saved_model)["model_state_dict"])
-
-    model.cuda()
-
-    if args.use_saved:
         train(model, args.epochs, args.output_file,
               config.training.batch_size, config.training.lr, sde,
               ema_decay=config.training.ema, gradient_clip=config.training.gradient_clip,
