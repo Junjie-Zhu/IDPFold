@@ -4,6 +4,7 @@ import pickle
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+from torch_geometric.data import Data
 
 RESIDUE_LIST = [
     "A",
@@ -33,9 +34,10 @@ atom_order = {atom: i for i, atom in enumerate(ATOM_LIST)}
 
 
 class BackboneDataset(Dataset):
-    def __init__(self, data_dir='../NMR_data/pkls', mode='train', split=0.8):
+    def __init__(self, data_dir='../NMR_data/pkls', mode='train', split=0.8, max_length=768):
         self.data_dir = data_dir
-        self.data_list = os.listdir(data_dir)[:30000]
+        self.data_list = os.listdir(data_dir)
+        self.max_length = max_length
 
         if mode == 'train':
             self.data_list = self.data_list[:int(split * len(self.data_list))]
@@ -46,6 +48,7 @@ class BackboneDataset(Dataset):
         return len(self.data_list)
 
     def __getitem__(self, index):
+        name = self.data_list[index]
         with open(os.path.join(self.data_dir, self.data_list[index]), 'rb') as f:
             model = pickle.load(f)
 
@@ -54,23 +57,34 @@ class BackboneDataset(Dataset):
                        for residue in res_serial
                        for atom in ['N', 'CA', 'C']]
 
-        if len(atom_serial) > 768:
+        if len(atom_serial) > self.max_length:  # Select sequences of length < 256
             return None
+
+        z = torch.tensor(len(atom_serial), dtype=torch.long)
 
         # Make one-hot embedding
         node_attr = torch.zeros([len(atom_serial)], dtype=torch.long)
-        padding = torch.zeros([768 - len(atom_serial)], dtype=torch.long)
-        atom_mask = torch.cat((node_attr, padding), 0)
 
         for atoms in range(len(node_attr)):
             node_attr[atoms] = atom_order[atom_serial[atoms]]
-        node_attr = torch.cat((node_attr, padding), 0)
-        
+
+        # Get coordinates for diffusion and edge attribution
         coords = np.array([np.array(resc).astype(float) for resc in model.values() if len(resc) == 3])
         coords = torch.Tensor(coords).view(-1, 3)
-
         centered_coords = coords - torch.sum(coords, dim=0)[None, :] / len(coords)
-        centered_coords = torch.cat((centered_coords, torch.zeros([len(padding), 3])), 0)
+
+        node_index = torch.tensor([i for i in range(len(atom_serial))])
+        edge_d_dst_index = torch.repeat_interleave(node_index, repeats=len(atom_serial))
+        edge_d_src_index = node_index.repeat(len(atom_serial))
+        edge_d_attr = centered_coords[edge_d_dst_index] - centered_coords[edge_d_src_index]
+        edge_d_attr = edge_d_attr.norm(dim=1, p=2)
+
+        edge_d_dst_index = edge_d_dst_index.view(1, -1)
+        edge_d_src_index = edge_d_src_index.view(1, -1)
+        edge_d_index = torch.cat((edge_d_dst_index, edge_d_src_index), dim=0)
+
+        data = Data(x=node_attr, pos=centered_coords, z=z, name=name,
+                    edge_d_index=edge_d_index, edge_d_attr=edge_d_attr)
 
         features = {'node_attr': node_attr,
                     'coordinates': centered_coords,

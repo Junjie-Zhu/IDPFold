@@ -1,77 +1,185 @@
 import torch
 import numpy as np
 import torch.nn as nn
+from e3nn import o3
+from torch_cluster import radius_graph
 
-class ConvLayer(nn.Module):
+from equiformer.drop import EquivariantDropout
+from equiformer.instance_norm import EquivariantInstanceNorm
+from equiformer.graph_norm import EquivariantGraphNorm
+from equiformer.layer_norm import EquivariantLayerNormV2
+from equiformer.fast_layer_norm import EquivariantLayerNormFast
+from equiformer.graph_attention_transformer import (TransBlock, NodeEmbeddingNetwork,
+                                                    EdgeDegreeEmbeddingNetwork, ScaledScatter)
+from equiformer.gaussian_rbf import GaussianRadialBasisLayer
+from equiformer.tensor_product_rescale import LinearRS
+from equiformer.fast_activation import Activation
 
-    def __init__(self, h_a, h_b, random_seed=None):
-        randomSeed(random_seed)
-        super(ConvLayer, self).__init__()
-        self.h_a = h_a
-        self.h_b = h_b
-        self.fc_full = nn.Linear(2 * self.h_a + self.h_b, 2 * self.h_a)
-        self.sigmoid = nn.Sigmoid()
-        self.activation_hidden = nn.ReLU()
-        self.bn_hidden = nn.BatchNorm1d(2 * self.h_a)
-        self.bn_output = nn.BatchNorm1d(self.h_a)
-        self.activation_output = nn.ReLU()
+from ocpmodels.models.gemnet.layers.radial_basis import RadialBasis
 
-    def forward(self, atom_emb, nbr_emb, nbr_adj_list, atom_mask):
-        N, M = nbr_adj_list.shape[1:]
-        B = atom_emb.shape[0]
+_RESCALE = True
+_USE_BIAS = True
 
-        atom_nbr_emb = atom_emb[torch.arange(B).unsqueeze(-1), nbr_adj_list.view(B, -1)].view(B, N, M, self.h_a)
-        atom_nbr_emb = atom_nbr_emb * atom_mask.unsqueeze(-1)
+_MAX_ATOM_TYPE = 60
 
-        total_nbr_emb = torch.cat([atom_emb.unsqueeze(2).expand(B, N, M, self.h_a), atom_nbr_emb, nbr_emb], dim=-1)
-        total_gated_emb = self.fc_full(total_nbr_emb)
-        total_gated_emb = self.bn_hidden(total_gated_emb.view(-1, self.h_a * 2)).view(B, N, M, self.h_a * 2)
-        nbr_filter, nbr_core = total_gated_emb.chunk(2, dim=3)
-        nbr_filter = self.sigmoid(nbr_filter)
-        nbr_core = self.activation_hidden(nbr_core)
-        nbr_sumed = torch.sum(nbr_filter * nbr_core, dim=2)
-        nbr_sumed = self.bn_output(nbr_sumed.view(-1, self.h_a)).view(B, N, self.h_a)
-        out = self.activation_output(atom_emb + nbr_sumed)
+_AVG_NUM_NODES = 18.03065905448718
+_AVG_DEGREE = 15.57930850982666
 
-        return out
+
+def get_norm_layer(norm_type):
+    if norm_type == 'graph':
+        return EquivariantGraphNorm
+    elif norm_type == 'instance':
+        return EquivariantInstanceNorm
+    elif norm_type == 'layer':
+        return EquivariantLayerNormV2
+    elif norm_type == 'fast_layer':
+        return EquivariantLayerNormFast
+    elif norm_type is None:
+        return None
+    else:
+        raise ValueError('Norm type {} not supported.'.format(norm_type))
 
 
 class Siege(nn.Module):
 
-    def __init__(self, config):
+    def __init__(self,
+                 irreps_in='5x0e',
+                 irreps_node_embedding='128x0e+64x1e+32x2e', num_layers=6,
+                 irreps_node_attr='1x0e', irreps_sh='1x0e+1x1e+1x2e',
+                 max_radius=5.0,
+                 number_of_basis=128, basis_type='gaussian', fc_neurons=[64, 64],
+                 irreps_feature='512x0e',
+                 irreps_head='32x0e+16x1o+8x2e', num_heads=4, irreps_pre_attn=None,
+                 rescale_degree=False, nonlinear_message=False,
+                 irreps_mlp_mid='128x0e+64x1e+32x2e',
+                 norm_layer='layer',
+                 alpha_drop=0.2, proj_drop=0.0, out_drop=0.0,
+                 drop_path_rate=0.0,
+                 mean=None, std=None, scale=None, atomref=None
+                 ):
         super(Siege, self).__init__()
 
-        self.h_a = config['h_a']
-        self.h_b = config['h_b']
-        self.n_conv = config['n_conv']
-        self.node_in = nn.Embedding(60, self.h_a)
+        self.max_radius = max_radius
+        self.number_of_basis = number_of_basis
+        self.alpha_drop = alpha_drop
+        self.proj_drop = proj_drop
+        self.out_drop = out_drop
+        self.drop_path_rate = drop_path_rate
+        self.norm_layer = norm_layer
+        self.task_mean = mean
+        self.task_std = std
+        self.scale = scale
+        self.register_buffer('atomref', atomref)
 
-        self.convs = nn.ModuleList([ConvLayer(self.h_a, self.h_b, random_seed=999) for _ in range(self.n_conv)])
-        self.t_embed = nn.ModuleList([TimeLinear(self.h_a) for _ in range(self.n_conv)])
-        self.e_out = nn.Linear(self.h_a, 1)
+        self.irreps_node_attr = o3.Irreps(irreps_node_attr)
+        self.irreps_node_input = o3.Irreps(irreps_in)
+        self.irreps_node_embedding = o3.Irreps(irreps_node_embedding)
+        self.lmax = self.irreps_node_embedding.lmax
+        self.irreps_feature = o3.Irreps(irreps_feature)
+        self.num_layers = num_layers
+        self.irreps_edge_attr = o3.Irreps(irreps_sh) if irreps_sh is not None \
+            else o3.Irreps.spherical_harmonics(self.lmax)
+        self.fc_neurons = [self.number_of_basis] + fc_neurons
+        self.irreps_head = o3.Irreps(irreps_head)
+        self.num_heads = num_heads
+        self.irreps_pre_attn = irreps_pre_attn
+        self.rescale_degree = rescale_degree
+        self.nonlinear_message = nonlinear_message
+        self.irreps_mlp_mid = o3.Irreps(irreps_mlp_mid)
 
-    def forward(self, node_attr, edge_attr, edge_idx, t, atom_mask):
-        node_attr = self.node_in(node_attr)
+        self.atom_embed = NodeEmbeddingNetwork(self.irreps_node_embedding, _MAX_ATOM_TYPE)
+        self.basis_type = basis_type
+        if self.basis_type == 'gaussian':
+            self.rbf = GaussianRadialBasisLayer(self.number_of_basis, cutoff=self.max_radius)
+        elif self.basis_type == 'bessel':
+            self.rbf = RadialBasis(self.number_of_basis, cutoff=self.max_radius,
+                                   rbf={'name': 'spherical_bessel'})
+        else:
+            raise ValueError
+        self.edge_deg_embed = EdgeDegreeEmbeddingNetwork(self.irreps_node_embedding,
+                                                         self.irreps_edge_attr, self.fc_neurons, _AVG_DEGREE)
 
-        for idx in range(self.n_conv):
-            node_attr = node_attr * atom_mask
-            node_attr = self.convs[idx](node_attr, edge_attr, edge_idx, atom_mask)
+        self.blocks = torch.nn.ModuleList()
+        self.build_blocks()
 
-            node_attr = node_attr * atom_mask
-            node_attr = self.t_embed[idx](node_attr, t)
+        self.norm = get_norm_layer(self.norm_layer)(self.irreps_feature)
+        self.out_dropout = None
+        if self.out_drop != 0.0:
+            self.out_dropout = EquivariantDropout(self.irreps_feature, self.out_drop)
+        self.head = torch.nn.Sequential(
+            LinearRS(self.irreps_feature, self.irreps_feature, rescale=_RESCALE),
+            Activation(self.irreps_feature, acts=[torch.nn.SiLU()]),
+            LinearRS(self.irreps_feature, o3.Irreps('1x0e'), rescale=_RESCALE))
+        self.scale_scatter = ScaledScatter(_AVG_NUM_NODES)
 
-        node_attr = node_attr * atom_mask
-        e_out = torch.sum(self.e_out(node_attr))
+        self.apply(self._init_weights)
 
-        return e_out
+    def build(self):
+        for i in range(self.num_layers):
+            if i != (self.num_layers - 1):
+                irreps_block_output = self.irreps_node_embedding
+            else:
+                irreps_block_output = self.irreps_feature
+            blk = TransBlock(irreps_node_input=self.irreps_node_embedding,
+                             irreps_node_attr=self.irreps_node_attr,
+                             irreps_edge_attr=self.irreps_edge_attr,
+                             irreps_node_output=irreps_block_output,
+                             fc_neurons=self.fc_neurons,
+                             irreps_head=self.irreps_head,
+                             num_heads=self.num_heads,
+                             irreps_pre_attn=self.irreps_pre_attn,
+                             rescale_degree=self.rescale_degree,
+                             nonlinear_message=self.nonlinear_message,
+                             alpha_drop=self.alpha_drop,
+                             proj_drop=self.proj_drop,
+                             drop_path_rate=self.drop_path_rate,
+                             irreps_mlp_mid=self.irreps_mlp_mid,
+                             norm_layer=self.norm_layer)
+            self.blocks.append(blk)
+
+    def forward(self, f_in, pos, batch, node_atom, **kwargs) -> torch.Tensor:
+
+        edge_src, edge_dst = radius_graph(pos, r=self.max_radius, batch=batch,
+                                          max_num_neighbors=1000)
+        edge_vec = pos.index_select(0, edge_src) - pos.index_select(0, edge_dst)
+        edge_sh = o3.spherical_harmonics(l=self.irreps_edge_attr,
+                                         x=edge_vec, normalize=True, normalization='component')
+
+        node_atom = node_atom.new_tensor([-1, 0, -1, -1, -1, -1, 1, 2, 3, 4])[node_atom]
+        atom_embedding, atom_attr, atom_onehot = self.atom_embed(node_atom)
+        edge_length = edge_vec.norm(dim=1)
+
+        edge_length_embedding = self.rbf(edge_length)
+        edge_degree_embedding = self.edge_deg_embed(atom_embedding, edge_sh,
+                                                    edge_length_embedding, edge_src, edge_dst, batch)
+        node_features = atom_embedding + edge_degree_embedding
+        node_attr = torch.ones_like(node_features.narrow(1, 0, 1))
+
+        for blk in self.blocks:
+            node_features = blk(node_input=node_features, node_attr=node_attr,
+                                edge_src=edge_src, edge_dst=edge_dst, edge_attr=edge_sh,
+                                edge_scalars=edge_length_embedding,
+                                batch=batch)
+
+        node_features = self.norm(node_features, batch=batch)
+        if self.out_dropout is not None:
+            node_features = self.out_dropout(node_features)
+        outputs = self.head(node_features)
+        outputs = self.scale_scatter(outputs, batch, dim=0)
+
+        if self.scale is not None:
+            outputs = self.scale * outputs
+
+        return outputs
 
     def predict(self, node_attr, coords, t, atom_mask):
         B, N, C = coords.shape[:]
 
         coords = coords * atom_mask
-        
+
         edge_attr = (coords.unsqueeze(dim=-2) - coords.unsqueeze(dim=-3)).norm(dim=-1)
-        non_self_mask =  ~torch.eye(N, dtype=torch.bool)
+        non_self_mask = ~torch.eye(N, dtype=torch.bool)
         non_self_mask = non_self_mask.unsqueeze(0).expand(B, -1, -1)
 
         edge_attr = edge_attr[non_self_mask].view(B, N, N - 1, 1)
@@ -89,38 +197,3 @@ class Siege(nn.Module):
         forces = - 1 * coords.grad / std[:, None, None, None]
 
         return forces
-
-    @staticmethod
-    def _rbf(D, D_min=0., D_max=20., D_count=16, device='cpu'):
-        D_mu = torch.linspace(D_min, D_max, D_count, device=device)
-        D_mu = D_mu.view([1, -1])
-        D_sigma = (D_max - D_min) / D_count
-        D_expand = torch.unsqueeze(D, -1)
-
-        RBF = torch.exp(-((D_expand - D_mu) / D_sigma) ** 2)
-        return RBF
-
-
-
-class TimeLinear(nn.Module):
-
-    def __init__(self, h_a):
-        super(TimeLinear, self).__init__()
-
-        self.time_weight_linear = nn.Linear(1, h_a, bias=False)
-        self.time_bias_linear = nn.Linear(1, h_a, bias=False)
-
-    def forward(self, node_attr, t):
-        t = t.view(node_attr.shape[0], 1, 1)
-
-        node_attr = node_attr * torch.sigmoid(self.time_weight_linear(t)) + torch.tanh(self.time_bias_linear(t))
-
-        return node_attr
-
-
-def randomSeed(random_seed):
-    """Given a random seed, this will help reproduce results across runs"""
-    if random_seed is not None:
-        torch.manual_seed(random_seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(random_seed)
