@@ -52,8 +52,6 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
 
     log_step = 100
 
-    validation_losses = []
-
     iters = len(loader)
 
     for e in range(epochs):
@@ -68,13 +66,14 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
 
             optimizer.zero_grad()
 
-            z, t, perturbed_data, mean, std = sample_noise(sde, features["coordinates"],
+            z, t, perturbed_data, mean, std = sample_noise(sde, features.pos,
                                                            device="cuda")
 
             # Get network prediction
             features = features.to('cuda')
-            prediction = model.predict_forces(features['node_attr'], features['coordinates'],
-                                              t, sde, features['atom_mask'])
+            prediction = model(f_in=features.x, pos=features.pos, batch=features.batch,
+                               node_atom=features.z,
+                               edge_d_index=features.edge_d_index, edge_d_attr=features.edge_d_attr)
 
             all_losses, loss = dsm(prediction, std, z, )
 
@@ -110,7 +109,7 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
                                   "optimizer_state_dict": optimizer.state_dict()
                                   }
 
-                    if ema_decay != None:
+                    if ema_decay is not None:
                         param_dict["ema_state_dict"] = ema.state_dict()
 
                     print("Saving model with new minimum loss")
