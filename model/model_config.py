@@ -12,7 +12,6 @@ config_backbone = mlc.ConfigDict(
             },
         "network":
             {
-                "irreps_in": '5x0e',
                 "irreps_node_embedding": '128x0e+64x1e+32x2e',
                 "num_layers": 6,
                 "irreps_node_attr": '1x0e',

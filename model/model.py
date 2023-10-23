@@ -14,7 +14,7 @@ from .equiformer.graph_attention_transformer import (TransBlock, NodeEmbeddingNe
 from .equiformer.gaussian_rbf import GaussianRadialBasisLayer
 from .equiformer.tensor_product_rescale import LinearRS
 from .equiformer.fast_activation import Activation
-
+from ..utils.training_utils import get_timestep_embedding
 
 from ocpmodels.models.gemnet.layers.radial_basis import RadialBasis
 
@@ -45,9 +45,9 @@ def get_norm_layer(norm_type):
 class Siege(nn.Module):
 
     def __init__(self,
-                 irreps_in='5x0e',
                  irreps_node_embedding='128x0e+64x1e+32x2e', num_layers=6,
                  irreps_node_attr='1x0e', irreps_sh='1x0e+1x1e+1x2e',
+                 t_emb_type='sinusoidal', t_emb_dim=64,
                  max_radius=5.0,
                  number_of_basis=128, basis_type='gaussian', fc_neurons=[64, 64],
                  irreps_feature='512x0e',
@@ -60,6 +60,8 @@ class Siege(nn.Module):
                  mean=None, std=None, scale=None, atomref=None
                  ):
         super(Siege, self).__init__()
+
+        self.t_emb_func = get_timestep_embedding(t_emb_type, t_emb_dim)
 
         self.max_radius = max_radius
         self.number_of_basis = number_of_basis
@@ -74,7 +76,7 @@ class Siege(nn.Module):
         self.register_buffer('atomref', atomref)
 
         self.irreps_node_attr = o3.Irreps(irreps_node_attr)
-        self.irreps_node_input = o3.Irreps(irreps_in)
+
         self.irreps_node_embedding = o3.Irreps(irreps_node_embedding)
         self.lmax = self.irreps_node_embedding.lmax
         self.irreps_feature = o3.Irreps(irreps_feature)
@@ -138,6 +140,14 @@ class Siege(nn.Module):
                              norm_layer=self.norm_layer)
             self.blocks.append(blk)
 
+    def _init_weights(self, m):
+        if isinstance(m, torch.nn.Linear):
+            if m.bias is not None:
+                torch.nn.init.constant_(m.bias, 0)
+        elif isinstance(m, torch.nn.LayerNorm):
+            torch.nn.init.constant_(m.bias, 0)
+            torch.nn.init.constant_(m.weight, 1.0)
+
     def forward(self, f_in, pos, batch, sde, t, **kwargs) -> torch.Tensor:
         pos = pos.clone().requires_grad_()
         _, std = sde.marginal_prob(torch.zeros(pos.shape).to(pos.device), t)
@@ -154,7 +164,9 @@ class Siege(nn.Module):
         edge_length_embedding = self.rbf(edge_length)
         edge_degree_embedding = self.edge_deg_embed(atom_embedding, edge_sh,
                                                     edge_length_embedding, edge_src, edge_dst, batch)
-        node_features = atom_embedding + edge_degree_embedding
+
+        t_features = self.t_emb_func(t * 10000)
+        node_features = atom_embedding + t_features + edge_degree_embedding
         node_attr = torch.ones_like(node_features.narrow(1, 0, 1))
 
         for blk in self.blocks:
@@ -167,6 +179,9 @@ class Siege(nn.Module):
         if self.out_dropout is not None:
             node_features = self.out_dropout(node_features)
         outputs = self.head(node_features)
+
+        print(outputs.shape)
+
         outputs = torch.sum(outputs, dim=-1)
 
         if self.scale is not None:
