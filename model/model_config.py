@@ -12,9 +12,9 @@ config_backbone = mlc.ConfigDict(
             },
         "network":
             {
-                "irreps_node_embedding": '128x0e+64x1e+32x2e',
+                "irreps_node_embedding": "128x0e+64x1e+32x2e",
                 "num_layers": 6,
-                "irreps_node_attr": '1x0e',
+                "irreps_node_attr": "1x0e",
                 "irreps_sh": '1x0e+1x1e+1x2e',
                 "max_radius": 10.0,
                 "number_of_basis": 128,

@@ -14,7 +14,7 @@ from .equiformer.graph_attention_transformer import (TransBlock, NodeEmbeddingNe
 from .equiformer.gaussian_rbf import GaussianRadialBasisLayer
 from .equiformer.tensor_product_rescale import LinearRS
 from .equiformer.fast_activation import Activation
-from ..utils.training_utils import get_timestep_embedding
+from .model_utils import get_timestep_embedding
 
 from ocpmodels.models.gemnet.layers.radial_basis import RadialBasis
 
@@ -61,6 +61,7 @@ class Siege(nn.Module):
                  ):
         super(Siege, self).__init__()
 
+        self.t_emb_dim = t_emb_dim
         self.t_emb_func = get_timestep_embedding(t_emb_type, t_emb_dim)
 
         self.max_radius = max_radius
@@ -91,7 +92,7 @@ class Siege(nn.Module):
         self.nonlinear_message = nonlinear_message
         self.irreps_mlp_mid = o3.Irreps(irreps_mlp_mid)
 
-        self.atom_embed = NodeEmbeddingNetwork(self.irreps_node_embedding, _MAX_ATOM_TYPE)
+        self.atom_embed = NodeEmbeddingNetwork(self.irreps_node_embedding, self.t_emb_dim, _MAX_ATOM_TYPE)
         self.basis_type = basis_type
         if self.basis_type == 'gaussian':
             self.rbf = GaussianRadialBasisLayer(self.number_of_basis, cutoff=self.max_radius)
@@ -104,7 +105,7 @@ class Siege(nn.Module):
                                                          self.irreps_edge_attr, self.fc_neurons, _AVG_DEGREE)
 
         self.blocks = torch.nn.ModuleList()
-        self.build_blocks()
+        self.build()
 
         self.norm = get_norm_layer(self.norm_layer)(self.irreps_feature)
         self.out_dropout = None
@@ -123,6 +124,7 @@ class Siege(nn.Module):
                 irreps_block_output = self.irreps_node_embedding
             else:
                 irreps_block_output = self.irreps_feature
+
             blk = TransBlock(irreps_node_input=self.irreps_node_embedding,
                              irreps_node_attr=self.irreps_node_attr,
                              irreps_edge_attr=self.irreps_edge_attr,
@@ -158,15 +160,14 @@ class Siege(nn.Module):
         edge_sh = o3.spherical_harmonics(l=self.irreps_edge_attr,
                                          x=edge_vec, normalize=True, normalization='component')
 
-        atom_embedding, atom_attr, atom_onehot = self.atom_embed(f_in)
+        atom_embedding, atom_attr, atom_onehot = self.atom_embed(f_in, self.t_emb_func(t * 10000))
         edge_length = edge_vec.norm(dim=1)
 
         edge_length_embedding = self.rbf(edge_length)
         edge_degree_embedding = self.edge_deg_embed(atom_embedding, edge_sh,
                                                     edge_length_embedding, edge_src, edge_dst, batch)
-
-        t_features = self.t_emb_func(t * 10000)
-        node_features = atom_embedding + t_features + edge_degree_embedding
+ 
+        node_features = atom_embedding + edge_degree_embedding
         node_attr = torch.ones_like(node_features.narrow(1, 0, 1))
 
         for blk in self.blocks:
@@ -180,9 +181,7 @@ class Siege(nn.Module):
             node_features = self.out_dropout(node_features)
         outputs = self.head(node_features)
 
-        print(outputs.shape)
-
-        outputs = torch.sum(outputs, dim=-1)
+        outputs = torch.sum(outputs)
 
         if self.scale is not None:
             outputs = self.scale * outputs

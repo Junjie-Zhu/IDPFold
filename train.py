@@ -13,11 +13,12 @@ import os
 import tqdm
 
 from torch_geometric.loader import DataLoader
+import torch.distributed as dist
 
 torch.autograd.set_detect_anomaly(True)
 
 
-def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
+def train(model, epochs, output_file, batch_size, lr, sde, ema_decay, local_rank,
           gradient_clip=None, eps=1e-5, saved_params=None, data_path="./", distributed=True):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
@@ -70,7 +71,7 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
                                                            device="cuda")
 
             # Get network prediction
-            features = features.to('cuda')
+            features = features.cuda(local_rank, non_blocking=True)
             prediction = model(f_in=features.x, pos=features.pos, batch=features.batch,
                                node_atom=features.z, sde=sde, t=t,
                                edge_d_index=features.edge_d_index, edge_d_attr=features.edge_d_attr)
@@ -126,6 +127,15 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
                                "checkpoints_" + "/" + output_file.replace(".pth", "_" + str(value + 1) + ".pth"))
 
 
+def reduce_mean(tensor, nprocs,device):
+    if not isinstance(tensor,torch.Tensor):
+        tensor = torch.as_tensor(tensor,device=device)
+    rt = tensor.clone()
+    dist.all_reduce(rt, op=dist.ReduceOp.SUM)
+    rt /= nprocs
+    return rt
+
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
@@ -138,7 +148,7 @@ if __name__ == "__main__":
                         help="File for output of model parameters", required=True, type=str)
     parser.add_argument("-d", dest="data_path",
                         help="Directory where data is stored", required=False,
-                        type=str, default="../NMR_data/pkls")
+                        type=str, default="../NMR_data/processed")
     parser.add_argument("-ep", dest="epochs", help="Number of epochs",
                         required=False, type=int, default=10)
     parser.add_argument("--seed", type=int, default=12)  # My lucky number
@@ -157,8 +167,10 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
 
     config = config_backbone
-    model = Siege(config.network)
+    model = Siege()
     model.cuda()
+
+    print('Setting completed, start training!')
 
     # distributed training
     if args.distributed:

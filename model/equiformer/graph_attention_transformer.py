@@ -669,23 +669,24 @@ class TransBlock(torch.nn.Module):
         
 class NodeEmbeddingNetwork(torch.nn.Module):
     
-    def __init__(self, irreps_node_embedding, max_atom_type=_MAX_ATOM_TYPE, bias=True):
+    def __init__(self, irreps_node_embedding, t_emb_dim, max_atom_type=_MAX_ATOM_TYPE, bias=True):
         
         super().__init__()
         self.max_atom_type = max_atom_type
+        self.t_emb_dim = t_emb_dim
         self.irreps_node_embedding = o3.Irreps(irreps_node_embedding)
-        self.atom_type_lin = LinearRS(o3.Irreps('{}x0e'.format(self.max_atom_type)), 
+        self.atom_type_lin = LinearRS(o3.Irreps('{}x0e'.format(self.max_atom_type + t_emb_dim)), 
             self.irreps_node_embedding, bias=bias)
         self.atom_type_lin.tp.weight.data.mul_(self.max_atom_type ** 0.5)
         
         
-    def forward(self, node_atom):
+    def forward(self, node_atom, t_embed):
         '''
             `node_atom` is a LongTensor.
         '''
         node_atom_onehot = torch.nn.functional.one_hot(node_atom, self.max_atom_type).float()
         node_attr = node_atom_onehot
-        node_embedding = self.atom_type_lin(node_atom_onehot)
+        node_embedding = self.atom_type_lin(torch.cat([t_embed, node_atom_onehot], dim=-1))
         
         return node_embedding, node_attr, node_atom_onehot
 
