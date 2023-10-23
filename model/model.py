@@ -4,16 +4,17 @@ import torch.nn as nn
 from e3nn import o3
 from torch_cluster import radius_graph
 
-from equiformer.drop import EquivariantDropout
-from equiformer.instance_norm import EquivariantInstanceNorm
-from equiformer.graph_norm import EquivariantGraphNorm
-from equiformer.layer_norm import EquivariantLayerNormV2
-from equiformer.fast_layer_norm import EquivariantLayerNormFast
-from equiformer.graph_attention_transformer import (TransBlock, NodeEmbeddingNetwork,
+from .equiformer.drop import EquivariantDropout
+from .equiformer.instance_norm import EquivariantInstanceNorm
+from .equiformer.graph_norm import EquivariantGraphNorm
+from .equiformer.layer_norm import EquivariantLayerNormV2
+from .equiformer.fast_layer_norm import EquivariantLayerNormFast
+from .equiformer.graph_attention_transformer import (TransBlock, NodeEmbeddingNetwork,
                                                     EdgeDegreeEmbeddingNetwork, ScaledScatter)
-from equiformer.gaussian_rbf import GaussianRadialBasisLayer
-from equiformer.tensor_product_rescale import LinearRS
-from equiformer.fast_activation import Activation
+from .equiformer.gaussian_rbf import GaussianRadialBasisLayer
+from .equiformer.tensor_product_rescale import LinearRS
+from .equiformer.fast_activation import Activation
+
 
 from ocpmodels.models.gemnet.layers.radial_basis import RadialBasis
 
@@ -111,7 +112,6 @@ class Siege(nn.Module):
             LinearRS(self.irreps_feature, self.irreps_feature, rescale=_RESCALE),
             Activation(self.irreps_feature, acts=[torch.nn.SiLU()]),
             LinearRS(self.irreps_feature, o3.Irreps('1x0e'), rescale=_RESCALE))
-        self.scale_scatter = ScaledScatter(_AVG_NUM_NODES)
 
         self.apply(self._init_weights)
 
@@ -138,7 +138,9 @@ class Siege(nn.Module):
                              norm_layer=self.norm_layer)
             self.blocks.append(blk)
 
-    def forward(self, f_in, pos, batch, node_atom, **kwargs) -> torch.Tensor:
+    def forward(self, f_in, pos, batch, sde, t, **kwargs) -> torch.Tensor:
+        pos = pos.clone().requires_grad_()
+        _, std = sde.marginal_prob(torch.zeros(pos.shape).to(pos.device), t)
 
         edge_src, edge_dst = radius_graph(pos, r=self.max_radius, batch=batch,
                                           max_num_neighbors=1000)
@@ -165,34 +167,13 @@ class Siege(nn.Module):
         if self.out_dropout is not None:
             node_features = self.out_dropout(node_features)
         outputs = self.head(node_features)
-        outputs = self.scale_scatter(outputs, batch, dim=0)
+        outputs = torch.sum(outputs, dim=-1)
 
         if self.scale is not None:
             outputs = self.scale * outputs
 
-        return outputs
-
-    def predict(self, node_attr, coords, t, atom_mask):
-        B, N, C = coords.shape[:]
-
-        coords = coords * atom_mask
-
-        edge_attr = (coords.unsqueeze(dim=-2) - coords.unsqueeze(dim=-3)).norm(dim=-1)
-        non_self_mask = ~torch.eye(N, dtype=torch.bool)
-        non_self_mask = non_self_mask.unsqueeze(0).expand(B, -1, -1)
-
-        edge_attr = edge_attr[non_self_mask].view(B, N, N - 1, 1)
-
-        edge_idx = torch.LongTensor(torch.arange(N).expand(N, -1).unsqueeze(0).expand(B, -1, -1))
-        edge_idx = edge_idx[non_self_mask].view(B, N, N - 1)
-        e_out = self.forward(node_attr, edge_attr, edge_idx, t, atom_mask)
-        return e_out
-
-    def predict_forces(self, node_attr, coords, t, sde, atom_mask):
-        _, std = sde.marginal_prob(torch.zeros(coords.shape).to(coords.device), t)
-
-        coords = coords.clone().requires_grad_()
-        self.predict(node_attr, coords, t, atom_mask).backward()
-        forces = - 1 * coords.grad / std[:, None, None, None]
+        outputs.backward()
+        forces = - 1 * pos.grad / std[:, None, None, None]
 
         return forces
+

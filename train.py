@@ -72,7 +72,7 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
             # Get network prediction
             features = features.to('cuda')
             prediction = model(f_in=features.x, pos=features.pos, batch=features.batch,
-                               node_atom=features.z,
+                               node_atom=features.z, sde=sde, t=t,
                                edge_d_index=features.edge_d_index, edge_d_attr=features.edge_d_attr)
 
             all_losses, loss = dsm(prediction, std, z, )
