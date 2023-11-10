@@ -21,7 +21,7 @@ from ocpmodels.models.gemnet.layers.radial_basis import RadialBasis
 _RESCALE = True
 _USE_BIAS = True
 
-_MAX_ATOM_TYPE = 60
+_MAX_ATOM_TYPE = 20
 
 _AVG_NUM_NODES = 18.03065905448718
 _AVG_DEGREE = 15.57930850982666
@@ -114,7 +114,7 @@ class Siege(nn.Module):
         self.head = torch.nn.Sequential(
             LinearRS(self.irreps_feature, self.irreps_feature, rescale=_RESCALE),
             Activation(self.irreps_feature, acts=[torch.nn.SiLU()]),
-            LinearRS(self.irreps_feature, o3.Irreps('1x0e'), rescale=_RESCALE))
+            LinearRS(self.irreps_feature, o3.Irreps('3x0e'), rescale=_RESCALE))
 
         self.apply(self._init_weights)
 
@@ -151,7 +151,7 @@ class Siege(nn.Module):
             torch.nn.init.constant_(m.weight, 1.0)
 
     def forward(self, f_in, pos, batch, sde, t, **kwargs) -> torch.Tensor:
-        pos = pos.clone().requires_grad_()
+        
         _, std = sde.marginal_prob(torch.zeros(pos.shape).to(pos.device), t)
 
         edge_src, edge_dst = radius_graph(pos, r=self.max_radius, batch=batch,
@@ -181,13 +181,9 @@ class Siege(nn.Module):
             node_features = self.out_dropout(node_features)
         outputs = self.head(node_features)
 
-        outputs = torch.sum(outputs)
-
         if self.scale is not None:
             outputs = self.scale * outputs
 
-        outputs.backward()
-        forces = - 1 * pos.grad / std[:, None, None, None]
-
-        return forces
+        outputs = -1 * torch.div(outputs, std.to(outputs.device).unsqueeze(-1))
+        return outputs
 

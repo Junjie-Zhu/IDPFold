@@ -290,7 +290,7 @@ class subVPSDE(SDE):
     def sde(self, x, t, means=None):
         beta_t = self.beta_0 + t * (self.beta_1 - self.beta_0)
 
-        drift = -0.5 * beta_t[:, None, None, None] * x
+        drift = -0.5 * torch.mul(beta_t.unsqueeze(-1), x)
 
         discount = 1. - torch.exp(-2 * self.beta_0 * t - (self.beta_1 - self.beta_0) * t ** 2)
         diffusion = torch.sqrt(beta_t * discount)
@@ -299,7 +299,7 @@ class subVPSDE(SDE):
     def marginal_prob(self, x, t):
         log_mean_coeff = -0.25 * t ** 2 * (self.beta_1 - self.beta_0) - 0.5 * t * self.beta_0
 
-        mean = torch.exp(log_mean_coeff)[:, None, None, None] * x
+        mean = torch.mul(torch.exp(log_mean_coeff).unsqueeze(-1), x)
 
         std = 1 - torch.exp(2. * log_mean_coeff)
         return mean, std

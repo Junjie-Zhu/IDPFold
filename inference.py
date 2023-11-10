@@ -1,6 +1,7 @@
 from model.model import Siege
 from model.ema import ExponentialMovingAverage
 from model.model_config import config_backbone
+from model.sampling import get_ode_sampler, TimeOutException
 from data.dataset import BackboneDataset
 from utils.training_utils import *
 from time import time
@@ -18,8 +19,8 @@ import torch.distributed as dist
 torch.autograd.set_detect_anomaly(True)
 
 
-def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
-          gradient_clip=None, eps=1e-5, saved_params=None, data_path="./", distributed=True):
+def inference(model, epochs, output_file, batch_size, lr, sde, ema_decay, num_samples=10,
+              gradient_clip=None, eps=1e-5, saved_params=None, data_path="./", distributed=True):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     if not saved_params is None:
@@ -53,82 +54,48 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
 
     log_step = 100
 
-    iters = len(loader)
+    iters = len(val_loader)
 
     for e in range(epochs):
-
-        model.train()
-        losses = []
 
         for value, features in enumerate(loader):
             if features is None:
                 continue
             torch.cuda.empty_cache()
 
-            optimizer.zero_grad()
-
-            z, t, perturbed_data, mean, std = sample_noise(sde, features.pos, features.batch,
-                                                           device="cuda")
-            features = features.cuda()
-            
             # Get network prediction
-            prediction = model(f_in=features.x, pos=perturbed_data, batch=features.batch,
-                               node_atom=features.z, sde=sde, t=t,)
+            features = features.cuda()
 
-            all_losses, loss = dsm(prediction, std, z, )
+            sampling_fn_backbone = get_ode_sampler(sde, (num_samples,
+                                                         features.x.shape[0],
+                                                         3),
+                                                   lambda x: x, device=features.device,
+                                                   denoise=False, rtol=1e-4, atol=1e-4,
+                                                   method='RK23', eps=1e-5,
+                                                   atom_mask=None, indices=None,
+                                                   means=None, multiple_points=False)
 
-            for index, i in enumerate(all_losses):
-                losses.append(torch.sum(i).cpu().detach().numpy())
+            complete = False
+            while not complete:
 
-            loss.requires_grad_(True)
-            loss.backward()
+                try:
+                    prediction = model(f_in=features.x, pos=features.pos, batch=features.batch,
+                                       node_atom=features.z, sde=sde, t=t, )
+                    z, nfe_backbone = sampling_fn_backbone(prediction)
 
-            if gradient_clip is not None:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
+                except TimeOutException:
+                    print("Backbone generation timed out")
+                    sys.stdout.flush()
+                    continue
 
-            optimizer.step()
-
-            if ema_decay is not None:
-                ema.update(model.parameters())
-
-            if (value + 1) % log_step == 0 or value == iters - 1:
-                elapsed = time() - start_time
-                elapsed = str(datetime.timedelta(seconds=elapsed))
-
-                log = "Elapsed [{}], Epoch [{}/{}], Iter [{}/{}]".format(
-                    elapsed, e + 1, epochs, value + 1, iters)
-                log += ", {}: {:.5f}".format('Loss', np.mean(losses))
-                log += ", {}: {:.5f}".format('Std', np.std(losses))
-
-                print(log)
-                sys.stdout.flush()
-
-                if losses[-1] == min(losses):
-
-                    param_dict = {"model_state_dict": model.state_dict(),
-                                  "optimizer_state_dict": optimizer.state_dict()
-                                  }
-
-                    if ema_decay is not None:
-                        param_dict["ema_state_dict"] = ema.state_dict()
-
-                    print("Saving model with new minimum loss")
-                    torch.save(param_dict, output_file)
-                    print("Saved model successfully!")
-
-                if (value + 1) % 100000 == 0:
-                    if not os.path.isdir("checkpoints_"):
-                        os.mkdir("checkpoints_")
-
-                    torch.save({"model_state_dict": model.state_dict(),
-                                "optimizer_state_dict": optimizer.state_dict()
-                                },
-                               "checkpoints_" + "/" + output_file.replace(".pth", "_" + str(value + 1) + ".pth"))
+                else:
+                    complete = True
 
 
-def reduce_mean(tensor, nprocs,device):
-    if not isinstance(tensor,torch.Tensor):
-        tensor = torch.as_tensor(tensor,device=device)
+
+def reduce_mean(tensor, nprocs, device):
+    if not isinstance(tensor, torch.Tensor):
+        tensor = torch.as_tensor(tensor, device=device)
     rt = tensor.clone()
     dist.all_reduce(rt, op=dist.ReduceOp.SUM)
     rt /= nprocs
@@ -153,7 +120,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=12)  # My lucky number
 
     # distributed training parameters
-    parser.add_argument('--world_size', default=1, type=int,
+    parser.add_argument('--world_size', default=2, type=int,
                         help='number of distributed processes')
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
 
@@ -180,14 +147,9 @@ if __name__ == "__main__":
 
     torch.cuda.empty_cache()
 
-    if args.use_saved:
-        model.load_state_dict(torch.load(args.saved_model)["model_state_dict"])
-        train(model, args.epochs, args.output_file,
+    model.eval()
+    model.load_state_dict(torch.load(args.saved_model)["model_state_dict"])
+    inference(model, args.epochs, args.output_file,
               config.training.batch_size, config.training.lr, sde,
               ema_decay=config.training.ema, gradient_clip=config.training.gradient_clip,
               saved_params=args.saved_model, data_path=args.data_path, )
-    else:
-
-        train(model, args.epochs, args.output_file, config.training.batch_size,
-              config.training.lr, sde, ema_decay=config.training.ema, gradient_clip=config.training.gradient_clip,
-              data_path=args.data_path, )

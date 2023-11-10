@@ -6,7 +6,7 @@ config_backbone = mlc.ConfigDict(
         "training":
             {
                 "lr": 0.0001,
-                "batch_size": 2,
+                "batch_size": 32,
                 "ema": 0.9999,
                 "gradient_clip": None,
             },

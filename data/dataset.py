@@ -6,32 +6,6 @@ import torch
 from torch.utils.data import Dataset
 from torch_geometric.data import Data
 
-RESIDUE_LIST = [
-    "A",
-    "R",
-    "N",
-    "D",
-    "C",
-    "Q",
-    "E",
-    "G",
-    "H",
-    "I",
-    "L",
-    "K",
-    "M",
-    "F",
-    "P",
-    "S",
-    "T",
-    "W",
-    "Y",
-    "V",
-]
-
-ATOM_LIST = [f"{residue}_{atom}" for residue in RESIDUE_LIST for atom in ['N', 'CA', 'C']]
-atom_order = {atom: i for i, atom in enumerate(ATOM_LIST)}
-
 
 class BackboneDataset(Dataset):
     def __init__(self, data_dir='../NMR_data/processed', mode='train', split=0.8, max_length=768):
@@ -49,5 +23,36 @@ class BackboneDataset(Dataset):
 
     def __getitem__(self, index):
         features = torch.load(os.path.join(self.data_dir, self.data_list[index]))
+
+        one_hot_atom = features.x
+        one_hot_res = one_hot_atom
+        for index in range(one_hot_atom.shape[0]):
+            one_hot_res[index] = one_hot_atom[index] // 3
+
+        features.x = one_hot_res.view(-1, 3)[:, 1].squeeze()
+        features.pos = features.pos.view(-1, 3, 3)[:, 1, :].squeeze()
+        features.z = torch.LongTensor(features.z.item() // 3)
+
         return features
 
+
+def collate(batch):
+    batch = [i for i in batch if i != None]
+    
+    if len(batch) == 0:
+        return None
+
+    features = {}
+    for feature in batch[0]:
+        
+        
+        if "name" not in feature:
+            
+            features[feature] = torch.stack([i[feature] for i in batch], dim=0)
+            
+            
+        else:
+            
+            features[feature] = [i[feature] for i in batch]
+
+    return features

@@ -6,17 +6,21 @@ import torch.distributed as dist
 
 
 
-def sample_noise(sde, x, device, eps=1e-5):
-    t = torch.rand(x.shape[0]) * (sde.T - eps) + eps
+def sample_noise(sde, x, batch, device, eps=1e-5):
+    t_concat = torch.rand(batch[-1].item() + 1) * (sde.T - eps) + eps
+    t = torch.zeros(x.shape[0])
+
+    for i in range(x.shape[0]):
+        t[i] = t_concat[batch[i]]
 
     z = torch.randn_like(x)
 
     mean, std = sde.marginal_prob(x, t)
-
+    
     mean = torch.FloatTensor(mean)
-    std = torch.FloatTensor(std)
+    std = torch.FloatTensor(std).unsqueeze(-1)
 
-    perturbed_data = mean + std[:, None, None, None] * z
+    perturbed_data = mean + torch.mul(z, std)
 
     return z.to(device), t.to(device), \
         perturbed_data.to(device), \
@@ -24,9 +28,9 @@ def sample_noise(sde, x, device, eps=1e-5):
 
 
 def dsm(prediction, std, z):
-    all_losses = torch.square(prediction * std[:, None, None, None] + z)
+    all_losses = torch.square(torch.mul(std, prediction) + z)
 
-    loss = torch.mean(torch.sum(all_losses, dim=(-1, -2, -3)))
+    loss = torch.mean(torch.sum(all_losses, dim=-1))
 
     return all_losses, loss
 
@@ -65,9 +69,9 @@ def init_distributed_mode(args):
         args.rank = int(os.environ["RANK"])
         args.world_size = int(os.environ['WORLD_SIZE'])
         args.local_rank = int(os.environ['LOCAL_RANK'])
-    elif 'SLURM_PROCID' in os.environ:
-        args.rank = int(os.environ['SLURM_PROCID'])
-        args.local_rank = args.rank % torch.cuda.device_count()
+    #elif 'SLURM_PROCID' in os.environ:
+    #    args.rank = int(os.environ['SLURM_PROCID'])
+    #    args.local_rank = args.rank % torch.cuda.device_count()
     else:
         print('Not using distributed mode')
         args.distributed = False
