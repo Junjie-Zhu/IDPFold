@@ -116,7 +116,7 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
                     torch.save(param_dict, output_file)
                     print("Saved model successfully!")
 
-                if (value + 1) % 100000 == 0:
+                if (value + 1) % 2500 == 0:
                     if not os.path.isdir("checkpoints_"):
                         os.mkdir("checkpoints_")
 

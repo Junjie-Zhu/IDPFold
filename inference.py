@@ -79,9 +79,8 @@ def inference(model, epochs, output_file, batch_size, lr, sde, ema_decay, num_sa
             while not complete:
 
                 try:
-                    prediction = model(f_in=features.x, pos=features.pos, batch=features.batch,
-                                       node_atom=features.z, sde=sde, t=t, )
-                    z, nfe_backbone = sampling_fn_backbone(prediction)
+                    score_model = model.sample(f_in=features.x, batch=features.batch, sde=sde, )
+                    z, nfe_backbone = sampling_fn_backbone(score_model)
 
                 except TimeOutException:
                     print("Backbone generation timed out")
@@ -92,14 +91,6 @@ def inference(model, epochs, output_file, batch_size, lr, sde, ema_decay, num_sa
                     complete = True
 
 
-
-def reduce_mean(tensor, nprocs, device):
-    if not isinstance(tensor, torch.Tensor):
-        tensor = torch.as_tensor(tensor, device=device)
-    rt = tensor.clone()
-    dist.all_reduce(rt, op=dist.ReduceOp.SUM)
-    rt /= nprocs
-    return rt
 
 
 if __name__ == "__main__":

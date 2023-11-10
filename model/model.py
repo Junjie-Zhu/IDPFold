@@ -187,3 +187,44 @@ class Siege(nn.Module):
         outputs = -1 * torch.div(outputs, std.to(outputs.device).unsqueeze(-1))
         return outputs
 
+    def sample(self, f_in, batch, sde):
+
+        # Return the METHOD "score_model", but not the output of it
+        def score_model(pos, t):
+
+            _, std = sde.marginal_prob(torch.zeros(pos.shape).to(pos.device), t)
+
+            edge_src, edge_dst = radius_graph(pos, r=self.max_radius, batch=batch,
+                                              max_num_neighbors=1000)
+            edge_vec = pos.index_select(0, edge_src) - pos.index_select(0, edge_dst)
+            edge_sh = o3.spherical_harmonics(l=self.irreps_edge_attr,
+                                             x=edge_vec, normalize=True, normalization='component')
+
+            atom_embedding, atom_attr, atom_onehot = self.atom_embed(f_in, self.t_emb_func(t * 10000))
+            edge_length = edge_vec.norm(dim=1)
+
+            edge_length_embedding = self.rbf(edge_length)
+            edge_degree_embedding = self.edge_deg_embed(atom_embedding, edge_sh,
+                                                        edge_length_embedding, edge_src, edge_dst, batch)
+
+            node_features = atom_embedding + edge_degree_embedding
+            node_attr = torch.ones_like(node_features.narrow(1, 0, 1))
+
+            for blk in self.blocks:
+                node_features = blk(node_input=node_features, node_attr=node_attr,
+                                    edge_src=edge_src, edge_dst=edge_dst, edge_attr=edge_sh,
+                                    edge_scalars=edge_length_embedding,
+                                    batch=batch)
+
+            node_features = self.norm(node_features, batch=batch)
+            if self.out_dropout is not None:
+                node_features = self.out_dropout(node_features)
+            outputs = self.head(node_features)
+
+            if self.scale is not None:
+                outputs = self.scale * outputs
+
+            outputs = -1 * torch.div(outputs, std.to(outputs.device).unsqueeze(-1))
+            return outputs
+
+        return score_model
