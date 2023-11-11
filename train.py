@@ -123,7 +123,8 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
                     torch.save({"model_state_dict": model.state_dict(),
                                 "optimizer_state_dict": optimizer.state_dict()
                                 },
-                               "checkpoints_" + "/" + output_file.replace(".pth", "_" + str(value + 1) + ".pth"))
+                               "checkpoints_" + "/" + output_file.replace(".pth", "_" 
+                                                                          + str(value + 1) + "_" + str(e) + ".pth"))
 
 
 def reduce_mean(tensor, nprocs,device):
