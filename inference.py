@@ -3,7 +3,8 @@ from model.ema import ExponentialMovingAverage
 from model.model_config import config_backbone
 from model.sampling import get_ode_sampler, TimeOutException
 from data.dataset import BackboneDataset
-from utils.training_utils import *
+from utils.training_utils import dsm, sample_noise, get_world_size, init_distributed_mode, get_rank
+from utils.sampling_utils import output_pdb
 from time import time
 import datetime
 import torch
@@ -89,8 +90,8 @@ def inference(model, epochs, output_file, batch_size, lr, sde, ema_decay, num_sa
 
                 else:
                     complete = True
-
-
+                    output_pdb(z, 'sample.pdb')
+                    exit()
 
 
 if __name__ == "__main__":

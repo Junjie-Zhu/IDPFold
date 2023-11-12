@@ -2,7 +2,7 @@ from model.model import Siege
 from model.ema import ExponentialMovingAverage
 from model.model_config import config_backbone
 from data.dataset import BackboneDataset
-from utils.training_utils import *
+from utils.training_utils import dsm, sample_noise, get_world_size, init_distributed_mode, get_rank
 from time import time
 import datetime
 import torch
