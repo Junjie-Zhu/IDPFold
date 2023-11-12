@@ -45,10 +45,10 @@ def get_norm_layer(norm_type):
 class Siege(nn.Module):
 
     def __init__(self,
-                 irreps_node_embedding='128x0e+64x1e+32x2e', num_layers=6,
+                 irreps_node_embedding='128x0e+64x1e+32x2e', num_layers=8,
                  irreps_node_attr='1x0e', irreps_sh='1x0e+1x1e+1x2e',
                  t_emb_type='sinusoidal', t_emb_dim=64,
-                 max_radius=5.0,
+                 max_radius=50.0,
                  number_of_basis=128, basis_type='gaussian', fc_neurons=[64, 64],
                  irreps_feature='512x0e',
                  irreps_head='32x0e+16x1o+8x2e', num_heads=4, irreps_pre_attn=None,
@@ -191,11 +191,14 @@ class Siege(nn.Module):
 
         # Return the METHOD "score_model", but not the output of it
         def score_model(pos, t):
+            pos = pos.squeeze()
+            t = t.repeat(pos.shape[0])
 
             _, std = sde.marginal_prob(torch.zeros(pos.shape).to(pos.device), t)
 
             edge_src, edge_dst = radius_graph(pos, r=self.max_radius, batch=batch,
                                               max_num_neighbors=1000)
+           
             edge_vec = pos.index_select(0, edge_src) - pos.index_select(0, edge_dst)
             edge_sh = o3.spherical_harmonics(l=self.irreps_edge_attr,
                                              x=edge_vec, normalize=True, normalization='component')
@@ -209,7 +212,7 @@ class Siege(nn.Module):
 
             node_features = atom_embedding + edge_degree_embedding
             node_attr = torch.ones_like(node_features.narrow(1, 0, 1))
-
+            
             for blk in self.blocks:
                 node_features = blk(node_input=node_features, node_attr=node_attr,
                                     edge_src=edge_src, edge_dst=edge_dst, edge_attr=edge_sh,

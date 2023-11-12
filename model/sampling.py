@@ -26,8 +26,8 @@ from torch_scatter import scatter, scatter_add
 from torchdiffeq import odeint_adjoint as odeint
 from scipy import integrate
 
-import sde_lib
-from ..utils.tensor_utils import get_trace_computation_tensors
+from . import sde_lib
+from .tensor_utils import get_trace_computation_tensors
 
 _CORRECTORS = {}
 _PREDICTORS = {}
@@ -594,7 +594,7 @@ def get_ode_sampler(sde, shape, inverse_scaler,
 
                 x = from_flattened_numpy(x, shape).to(device).type(torch.float32)
                 vec_t = torch.ones(shape[0], device=x.device) * t
-                drift = drift_fn(model, x, vec_t, means) * atom_mask[:, None, :, :]
+                drift = drift_fn(model, x, vec_t, means) 
                 return to_flattened_numpy(drift)
 
             # Black-box ODE solver for the probability flow ODE

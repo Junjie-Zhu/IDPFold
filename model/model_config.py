@@ -6,7 +6,7 @@ config_backbone = mlc.ConfigDict(
         "training":
             {
                 "lr": 0.0001,
-                "batch_size": 32,
+                "batch_size": 16,
                 "ema": 0.9999,
                 "gradient_clip": None,
             },
@@ -16,7 +16,7 @@ config_backbone = mlc.ConfigDict(
                 "num_layers": 6,
                 "irreps_node_attr": "1x0e",
                 "irreps_sh": '1x0e+1x1e+1x2e',
-                "max_radius": 10.0,
+                "max_radius": 15.0,
                 "number_of_basis": 128,
                 "basis_type": 'gaussian',
                 "fc_neurons": [64, 64],
@@ -39,6 +39,7 @@ config_backbone = mlc.ConfigDict(
             "eps": 1e-5
         },
         "sampling": {
+            "batch_size": 1,
             "method": 'ode',
             "rtol": 1e-4,
             "atol": 1e-4,

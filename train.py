@@ -2,7 +2,7 @@ from model.model import Siege
 from model.ema import ExponentialMovingAverage
 from model.model_config import config_backbone
 from data.dataset import BackboneDataset
-from utils.training_utils import dsm, sample_noise, get_world_size, init_distributed_mode, get_rank
+from utils.training_utils import *
 from time import time
 import datetime
 import torch
@@ -26,7 +26,6 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
         optimizer.load_state_dict(torch.load(saved_params)["optimizer_state_dict"])
 
     if ema_decay is not None:
-
         ema = ExponentialMovingAverage(model.parameters(), decay=ema_decay)
 
         if saved_params is not None:
@@ -103,7 +102,7 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
                 print(log)
                 sys.stdout.flush()
 
-                if losses[-1] == min(losses):
+                if min(losses) in losses[-1 * log_step:]:
 
                     param_dict = {"model_state_dict": model.state_dict(),
                                   "optimizer_state_dict": optimizer.state_dict()
@@ -121,10 +120,10 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
                         os.mkdir("checkpoints_")
 
                     torch.save({"model_state_dict": model.state_dict(),
-                                "optimizer_state_dict": optimizer.state_dict()
+                                "optimizer_state_dict": optimizer.state_dict(),
+                                "ema_state_dict": ema.state_dict()
                                 },
-                               "checkpoints_" + "/" + output_file.replace(".pth", "_" 
-                                                                          + str(value + 1) + "_" + str(e) + ".pth"))
+                               "checkpoints_" + "/" + output_file.replace(".pth", "_" + str(value + 1) + "_" + str(e) + ".pth"))
 
 
 def reduce_mean(tensor, nprocs,device):

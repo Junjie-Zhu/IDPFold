@@ -20,19 +20,8 @@ import torch.distributed as dist
 torch.autograd.set_detect_anomaly(True)
 
 
-def inference(model, epochs, output_file, batch_size, lr, sde, ema_decay, num_samples=10,
-              gradient_clip=None, eps=1e-5, saved_params=None, data_path="./", distributed=True):
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-
-    if not saved_params is None:
-        optimizer.load_state_dict(torch.load(saved_params)["optimizer_state_dict"])
-
-    if ema_decay is not None:
-
-        ema = ExponentialMovingAverage(model.parameters(), decay=ema_decay)
-
-        if saved_params is not None:
-            ema.load_state_dict(torch.load(saved_params)["ema_state_dict"])
+def inference(model, epochs, batch_size, sde, num_samples=10,
+              eps=1e-5, saved_params=None, data_path="./", distributed=True):
 
     # Dataset loading
     dataset = BackboneDataset(data_dir=data_path, mode='train')
@@ -59,7 +48,7 @@ def inference(model, epochs, output_file, batch_size, lr, sde, ema_decay, num_sa
 
     for e in range(epochs):
 
-        for value, features in enumerate(loader):
+        for value, features in enumerate(val_loader):
             if features is None:
                 continue
             torch.cuda.empty_cache()
@@ -67,10 +56,10 @@ def inference(model, epochs, output_file, batch_size, lr, sde, ema_decay, num_sa
             # Get network prediction
             features = features.cuda()
 
-            sampling_fn_backbone = get_ode_sampler(sde, (num_samples,
+            sampling_fn_backbone = get_ode_sampler(sde, (1,
                                                          features.x.shape[0],
                                                          3),
-                                                   lambda x: x, device=features.device,
+                                                   lambda x: x, device=features.x.device,
                                                    denoise=False, rtol=1e-4, atol=1e-4,
                                                    method='RK23', eps=1e-5,
                                                    atom_mask=None, indices=None,
@@ -90,8 +79,10 @@ def inference(model, epochs, output_file, batch_size, lr, sde, ema_decay, num_sa
 
                 else:
                     complete = True
-                    output_pdb(z, 'sample.pdb')
-                    exit()
+                    output_pdb(z, 'sample_%d.pdb' % int(value))
+
+            if value == 10:
+                exit()
 
 
 if __name__ == "__main__":
@@ -102,8 +93,6 @@ if __name__ == "__main__":
                         required=False, default=False, action='store_true')
     parser.add_argument("-sm", dest="saved_model", help="File containing saved params",
                         required=False, type=str, default="Saved.pth")
-    parser.add_argument("-o", dest="output_file",
-                        help="File for output of model parameters", required=True, type=str)
     parser.add_argument("-d", dest="data_path",
                         help="Directory where data is stored", required=False,
                         type=str, default="../NMR_data/processed")
@@ -141,7 +130,6 @@ if __name__ == "__main__":
 
     model.eval()
     model.load_state_dict(torch.load(args.saved_model)["model_state_dict"])
-    inference(model, args.epochs, args.output_file,
-              config.training.batch_size, config.training.lr, sde,
-              ema_decay=config.training.ema, gradient_clip=config.training.gradient_clip,
-              saved_params=args.saved_model, data_path=args.data_path, )
+    inference(model, args.epochs,
+              config.sampling.batch_size, sde,
+              data_path=args.data_path, )
