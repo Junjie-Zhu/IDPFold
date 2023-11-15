@@ -149,7 +149,7 @@ if __name__ == "__main__":
                         help="Directory where data is stored", required=False,
                         type=str, default="../NMR_data/processed")
     parser.add_argument("-ep", dest="epochs", help="Number of epochs",
-                        required=False, type=int, default=10)
+                        required=False, type=int, default=100)
     parser.add_argument("--seed", type=int, default=12)  # My lucky number
 
     # distributed training parameters

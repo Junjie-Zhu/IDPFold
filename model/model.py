@@ -45,10 +45,10 @@ def get_norm_layer(norm_type):
 class Siege(nn.Module):
 
     def __init__(self,
-                 irreps_node_embedding='128x0e+64x1e+32x2e', num_layers=8,
+                 irreps_node_embedding='128x0e+64x1e+32x2e', num_layers=6,
                  irreps_node_attr='1x0e', irreps_sh='1x0e+1x1e+1x2e',
                  t_emb_type='sinusoidal', t_emb_dim=64,
-                 max_radius=50.0,
+                 max_radius=30.0,
                  number_of_basis=128, basis_type='gaussian', fc_neurons=[64, 64],
                  irreps_feature='512x0e',
                  irreps_head='32x0e+16x1o+8x2e', num_heads=4, irreps_pre_attn=None,
