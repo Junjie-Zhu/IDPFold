@@ -191,6 +191,7 @@ class Siege(nn.Module):
 
         # Return the METHOD "score_model", but not the output of it
         def score_model(pos, t):
+            print(t)
             pos = pos.squeeze()
             t = t.repeat(pos.shape[0])
 

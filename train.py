@@ -2,7 +2,7 @@ from model.model import Siege
 from model.ema import ExponentialMovingAverage
 from model.model_config import config_backbone
 from data.dataset import BackboneDataset
-from utils.training_utils import *
+from utils.training_utils import dsm, sample_noise, setup, sync_tensor_across_gpus
 from time import time
 import datetime
 import torch
@@ -10,7 +10,6 @@ import sys
 import argparse
 import numpy as np
 import os
-import tqdm
 
 from torch_geometric.loader import DataLoader
 import torch.distributed as dist
@@ -20,6 +19,7 @@ torch.autograd.set_detect_anomaly(True)
 
 def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
           gradient_clip=None, eps=1e-5, saved_params=None, data_path="./", distributed=True):
+    '''
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     if not saved_params is None:
@@ -30,15 +30,14 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
 
         if saved_params is not None:
             ema.load_state_dict(torch.load(saved_params)["ema_state_dict"])
+    '''
 
     # Dataset loading
     dataset = BackboneDataset(data_dir=data_path, mode='train')
     val_dataset = BackboneDataset(data_dir=data_path, mode='test')
 
     if distributed:
-        sampler_train = torch.utils.data.DistributedSampler(
-            dataset, num_replicas=get_world_size(), rank=get_rank(), shuffle=True
-        )
+        sampler_train = torch.utils.data.DistributedSampler(dataset, shuffle=True)
         loader = DataLoader(dataset, batch_size=batch_size,
                             sampler=sampler_train, num_workers=4,
                             drop_last=True)
@@ -53,6 +52,7 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
     log_step = 100
 
     iters = len(loader)
+    print(iters)
 
     for e in range(epochs):
 
@@ -102,37 +102,34 @@ def train(model, epochs, output_file, batch_size, lr, sde, ema_decay,
                 print(log)
                 sys.stdout.flush()
 
-                if min(losses) in losses[-1 * log_step:]:
+                losses = []
 
-                    param_dict = {"model_state_dict": model.state_dict(),
-                                  "optimizer_state_dict": optimizer.state_dict()
-                                  }
+            if (value + 1) % 2500 == 0 or (value + 1) == iters:
 
-                    if ema_decay is not None:
-                        param_dict["ema_state_dict"] = ema.state_dict()
-
-                    print("Saving model with new minimum loss")
-                    torch.save(param_dict, output_file)
-                    print("Saved model successfully!")
-
-                if (value + 1) % 2500 == 0:
+                if local_rank == 0:
                     if not os.path.isdir("checkpoints_"):
                         os.mkdir("checkpoints_")
 
-                    torch.save({"model_state_dict": model.state_dict(),
+                    torch.save({"model_state_dict": model.module.state_dict(),
                                 "optimizer_state_dict": optimizer.state_dict(),
-                                "ema_state_dict": ema.state_dict()
                                 },
-                               "checkpoints_" + "/" + output_file.replace(".pth", "_" + str(value + 1) + "_" + str(e) + ".pth"))
+                               "checkpoints_" + "/" + output_file.replace(".pth", "_" + str(value + 1)
+                                                                          + "_" + str(e) + ".pth"))
 
 
-def reduce_mean(tensor, nprocs,device):
-    if not isinstance(tensor,torch.Tensor):
-        tensor = torch.as_tensor(tensor,device=device)
-    rt = tensor.clone()
-    dist.all_reduce(rt, op=dist.ReduceOp.SUM)
-    rt /= nprocs
-    return rt
+def prepare_model_dict(input_dict):
+
+    already_ddp = False
+
+    for keys in input_dict.keys():
+        if 'module' in keys:
+            already_ddp = True
+        break
+           
+    if already_ddp:
+        return {key.replace('module.', ''): value for key, value in input_dict.items()} 
+    else:
+        return input_dict            
 
 
 if __name__ == "__main__":
@@ -152,15 +149,9 @@ if __name__ == "__main__":
                         required=False, type=int, default=100)
     parser.add_argument("--seed", type=int, default=12)  # My lucky number
 
-    # distributed training parameters
-    parser.add_argument('--world_size', default=1, type=int,
-                        help='number of distributed processes')
-    parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
-
     args = parser.parse_args()
 
-    init_distributed_mode(args)
-    is_main_process = (args.rank == 0)
+    local_rank, device = setup()
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
@@ -169,11 +160,25 @@ if __name__ == "__main__":
     model = Siege()
     model.cuda()
 
+    # load model parameters
+    model.load_state_dict(torch.load(args.saved_model)["model_state_dict"])
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.training.lr)
+    ema_decay = config.training.ema
+
+    if args.saved_model is not None:
+        optimizer.load_state_dict(torch.load(args.saved_model)["optimizer_state_dict"])
+
+    if ema_decay is not None:
+        ema = ExponentialMovingAverage(model.parameters(), decay=ema_decay)
+
+        if args.saved_model is not None:
+            ema.load_state_dict(torch.load(args.saved_model)["ema_state_dict"])
+
     print('Setting completed, start training!')
 
     # distributed training
-    if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.local_rank])
+    model = torch.nn.parallel.DistributedDataParallel(model)
 
     sde = config.sde_config.sde(beta_min=config.sde_config.beta_min,
                                 beta_max=config.sde_config.beta_max)
@@ -181,7 +186,8 @@ if __name__ == "__main__":
     torch.cuda.empty_cache()
 
     if args.use_saved:
-        model.load_state_dict(torch.load(args.saved_model)["model_state_dict"])
+
+        # model.load_state_dict(prepare_model_dict(torch.load(args.saved_model)["model_state_dict"]))
         train(model, args.epochs, args.output_file,
               config.training.batch_size, config.training.lr, sde,
               ema_decay=config.training.ema, gradient_clip=config.training.gradient_clip,

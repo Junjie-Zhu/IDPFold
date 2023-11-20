@@ -3,7 +3,7 @@ from model.ema import ExponentialMovingAverage
 from model.model_config import config_backbone
 from model.sampling import get_ode_sampler, TimeOutException
 from data.dataset import BackboneDataset
-from utils.training_utils import dsm, sample_noise, get_world_size, init_distributed_mode, get_rank
+from utils.training_utils import dsm, sample_noise
 from utils.sampling_utils import output_pdb
 from time import time
 import datetime
@@ -29,7 +29,7 @@ def inference(model, epochs, batch_size, sde, num_samples=10,
 
     if distributed:
         sampler_train = torch.utils.data.DistributedSampler(
-            dataset, num_replicas=get_world_size(), rank=get_rank(), shuffle=True
+            dataset, shuffle=True
         )
         loader = DataLoader(dataset, batch_size=batch_size,
                             sampler=sampler_train, num_workers=4,
@@ -107,9 +107,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    init_distributed_mode(args)
-    is_main_process = (args.rank == 0)
-
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
@@ -118,10 +115,6 @@ if __name__ == "__main__":
     model.cuda()
 
     print('Setting completed, start training!')
-
-    # distributed training
-    if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.local_rank])
 
     sde = config.sde_config.sde(beta_min=config.sde_config.beta_min,
                                 beta_max=config.sde_config.beta_max)
@@ -132,4 +125,4 @@ if __name__ == "__main__":
     model.load_state_dict(torch.load(args.saved_model)["model_state_dict"])
     inference(model, args.epochs,
               config.sampling.batch_size, sde,
-              data_path=args.data_path, )
+              data_path=args.data_path, distributed=False)
