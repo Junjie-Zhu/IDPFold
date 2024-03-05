@@ -67,10 +67,12 @@ def read_pdb(filename):
 
 def organize_data(atom_data):
     residue_dict = []
+    sequence = ''
 
     index = 0
     for model in atom_data:
         residue_dict.append({})
+
         single_chain_id = model[0]['chain_id']
         for atom_info in model:
             if atom_info['chain_id'] == single_chain_id:  # Only save single chain structure
@@ -84,25 +86,40 @@ def organize_data(atom_data):
                 if residue_info not in residue_dict[index]:
                     residue_dict[index][residue_info] = []
 
-                residue_dict[index][residue_info].append([x, y, z])
+                residue_dict[index][residue_info].append([atom_info['residue_name'], atom_name, x, y, z])
+
+                if index == 0:
+                    sequence += residue_name
         index += 1
-    return residue_dict
+    return residue_dict, sequence
 
 
 def check_sequence(residue_dict):
     complete = True
 
-    try:
-        model = residue_dict[0]
-    except IndexError:
-        return False
-    
+    model = residue_dict[0]
     residue_serial = [int(key[1:]) for key in model.keys()]
 
     if len(residue_serial) != (residue_serial[-1] - residue_serial[0] + 1):
-         complete = False
+        complete = False
+    elif len(residue_serial) <= 10:
+        complete = False
 
     return complete
+
+
+def save_as_pdb(residue_dict, output_prefix):
+    for i in range(len(residue_dict)):
+        output_file = f'{output_prefix}_{i}.pdb'
+        with open(output_file, 'w') as f:
+
+            for j, residue in enumerate(residue_dict[i]):
+                for k, residue_info in enumerate(residue_dict[i][residue]):
+                    # Format: ATOM  i  atom  residue chainID  seqNo  x  y  z  occupancy  tempFactor  element
+                    f.write(f"ATOM  {3 * j + k + 1: >5}  {residue_info[1]: <4}  {residue_info[0]: <3}  A   {j: >4}    "
+                            f"{residue_info[2]: >8.3f}{residue_info[3]: >8.3f}{residue_info[4]: >8.3f}"
+                            "  1.00 20.00           "  # Default occupancy and temperature factor
+                            f"{residue_info[1][0]}\n")
 
 
 def save_as_pkl(residue_dict, output_prefix):
@@ -120,47 +137,19 @@ def load_as_pkl(input_prefix):
     return residue_dict
 
 
-def save_as_pdb(residue_dict, output_prefix):
-    for i in range(len(residue_dict)):
-        output_file = f'{output_prefix}_{i}.pdb'
-
-        with open(output_file, 'w') as f:
-            atom_serial = 1
-
-            for keys, values in residue_dict[i].items():
-
-                residue_type = restype_1to3[keys[0]]
-                residue_serial = keys[1:]
-
-                if len(values) == 3:
-
-                    atom_name = ['N', 'CA', 'C']
-                    for i in range(3):
-                        atom_record = f"ATOM  {atom_serial:5} {atom_name[i]:4} {residue_type:3} A{residue_serial:>4}    {values[i][0]:8.3f}{values[i][1]:8.3f}{values[i][2]:8.3f}  1.00  0.00           {atom_name[i][0]:2}\n"
-                        f.write(atom_record)
-                        atom_serial += 1
-
-            f.write('ENDMDL\n')
-                
-
-def auto_process(input_pdb, output_path, check=True, save_pdb=True):
+def auto_process(input_pdb, output_path, check=True):
     output_prefix = os.path.join(output_path, input_pdb.split('/')[-1].split('.')[0])
 
     atom_data = read_pdb(input_pdb)
-    residue_dict = organize_data(atom_data)
+    residue_dict, sequence = organize_data(atom_data)
 
     if check:
         complete = check_sequence(residue_dict)
-        if complete and not save_pdb:
+        if complete:
             save_as_pkl(residue_dict, output_prefix)
-        elif complete and save_pdb:
-            save_as_pdb(residue_dict, output_prefix)
         else:
             return input_pdb
     else:
-        if not save_pdb:
-            save_as_pkl(residue_dict, output_prefix)
-        elif save_pdb:
-            save_as_pdb(residue_dict, output_prefix)
+        save_as_pdb(residue_dict, output_prefix)
 
-    return 0
+    return sequence
