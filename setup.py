@@ -3,12 +3,12 @@
 from setuptools import find_packages, setup
 
 setup(
-    name="src",
+    name="idpfold",
     version="0.0.1",
-    description="Describe Your Cool Project",
-    author="",
-    author_email="",
-    url="https://github.com/user/project",
+    description="Precise Generation of Conformational Ensembles for Intrinsically Disordered Proteins Using Fine-tuned Diffusion Models",
+    author="Junjie Zhu",
+    author_email="shiroyuki@sjtu.edu.cn",
+    url="https://github.com/Junjie-Zhu/IDPFold",
     install_requires=["lightning", "hydra-core"],
     packages=find_packages(),
     # use this to customize global commands available in the terminal after installing the package
