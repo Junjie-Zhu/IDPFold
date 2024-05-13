@@ -1,5 +1,5 @@
-# 
-Precise Generation of Conformational Ensembles for Intrinsically Disordered Proteins Using Fine-tuned Diffusion Models
+
+# Precise Generation of Conformational Ensembles for Intrinsically Disordered Proteins Using Fine-tuned Diffusion Models
 
 <a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white"></a>
 <a href="https://pytorchlightning.ai/"><img alt="Lightning" src="https://img.shields.io/badge/-Lightning-792ee5?logo=pytorchlightning&logoColor=white"></a>
@@ -50,7 +50,7 @@ TEST_DATA="/path/to/test/data"  # path to pdb files for inference, the directory
 To generate conformational ensembles for given sequences, you should:
 
 - Prepare a `fasta` file, both single sequence and multiple are allowed
-- Check the checkpoint file, our pretrained model checkpoints are in directory `data` 
+- Check the checkpoint file, our pretrained model checkpoints can be accessed from [Google Drive](https://drive.google.com/drive/folders/1-5BHexAZKGX1lWyPkYU-JFi1EId88P9i?usp=sharing)
 - Run the following command
 
 ```bash
@@ -63,5 +63,10 @@ python src/eval.py --ckpt_path=/path/to/ckpt
 
 ## Training
 
-To be updated...
+To be updated ...
 
+
+
+<hr/>
+
+This is a test version of IDPFold, if you have any question please either create an issue or directly contact shiroyuki@sjtu.edu.cn!
