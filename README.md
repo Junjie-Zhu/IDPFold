@@ -49,7 +49,7 @@ TEST_DATA="/path/to/test/data"  # path to pdb files for inference, the directory
 
 To generate conformational ensembles for given sequences, you should:
 
-- Prepare a `fasta` file, both single sequence and multiple are allowed
+- Prepare a `fasta` file, both single sequence and multiple are allowed, an example has been provided in `data/example.fasta`
 - Check the checkpoint file, our pretrained model checkpoints can be accessed from [Google Drive](https://drive.google.com/drive/folders/1-5BHexAZKGX1lWyPkYU-JFi1EId88P9i?usp=sharing)
 - Run the following command
 
