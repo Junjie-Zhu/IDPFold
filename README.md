@@ -55,10 +55,10 @@ To generate conformational ensembles for given sequences, you should:
 
 ```bash
 # Extract sequence embeddings
-python src/read_seqs.py --pred_dir=/path/to/fasta/file
+python src/read_seqs.py pred_dir=/path/to/fasta/file
 
 # Inference
-python src/eval.py --ckpt_path=/path/to/ckpt
+python src/eval.py ckpt_path=/path/to/ckpt
 ```
 
 ## Training
