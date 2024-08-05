@@ -36,13 +36,10 @@ pip install fair-esm
 pip install -e .
 ```
 
-After installation, you need to update the `.env` file with the correct paths to the data and the pretrained model. You can use the provided `.env.example` as a template.
+After installation, you need to update the `.env` file that contains path to datasets. We provide a script for initializing `.env` file, just run the folloing command:
 
 ```bash
-CACHE_DIR="/path/to/.cache"
-TRAIN_DATA="/path/to/train/data"  # path to pdb files for training model, please make sure the directory is not empty
-EMBEDDING="/path/to/PLM/embeddings"  # path to ESM-2 embeddings, the directory can be empty for inference
-TEST_DATA="/path/to/test/data"  # path to pdb files for inference, the directory can be empty for inference
+python initialize.py
 ```
 
 ## Inference
@@ -55,10 +52,10 @@ To generate conformational ensembles for given sequences, you should:
 
 ```bash
 # Extract sequence embeddings
-python src/read_seqs.py pred_dir=/path/to/fasta/file
+python src/read_seqs.py pred_dir='./data/example.fasta'
 
 # Inference
-python src/eval.py ckpt_path=/path/to/ckpt
+python src/eval.py ckpt_path='/path/to/ckpt'
 ```
 
 ## Training

@@ -3,6 +3,7 @@ import sys
 
 import hydra
 import rootutils
+import torch
 import esm
 from omegaconf import DictConfig
 
@@ -20,12 +21,7 @@ def main(cfg: DictConfig,) -> None:
     sequence_path = cfg.data.dataset.path_to_seq_embedding
     pdb_path = cfg.data.dataset.path_to_dataset
     input_fasta = cfg.pred_dir
-
-    if not os.path.isdir(sequence_path):
-        os.mkdir(sequence_path)
-
-    if not os.path.isdir(pdb_path):
-        os.mkdir(pdb_path)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     to_process_list = []
     with open(input_fasta, 'r') as f:
@@ -53,10 +49,10 @@ def main(cfg: DictConfig,) -> None:
                     f'ATOM  {i + 1:>5}  CA  {restype_dict[aa]:>3} A {i + 1:>3}      0.000   0.000   0.000  1.00  0.00           C\n')
 
     model, alphabet = esm.pretrained.esm2_t33_650M_UR50D()
-    model = model.cuda()
+    model = model.to(device)
 
     # ESM embeddings
-    sequence_labels, sequence_strs, representation = calculate_representation(model, alphabet, to_process_list)
+    sequence_labels, sequence_strs, representation = calculate_representation(model, alphabet, to_process_list, device)
 
     for labels, strs, reps in zip(sequence_labels, sequence_strs, representation):
         save_representation(labels, strs, reps, os.path.join(sequence_path, (labels + '.pkl')))
